@@ -16,7 +16,8 @@ dist_supervdsm_api_PYTHON = \
 	multipath.py \
 	nbd.py \
 	network.py \
-	sanlock_direct.py \
+	rbd.py \
+sanlock_direct.py \
 	saslpasswd2.py \
 	systemctl.py \
 	test.py \

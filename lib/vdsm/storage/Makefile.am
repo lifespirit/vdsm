@@ -67,7 +67,10 @@ dist_vdsmstorage_PYTHON = \
 	outOfProcess.py \
 	persistent.py \
 	qemuimg.py \
-	resourceFactories.py \
+	rbdSD.py \
+rbdVolume.py \
+rbd_utils.py \
+resourceFactories.py \
 	resourceManager.py \
 	rwlock.py \
 	sanlockconf.py \

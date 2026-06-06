@@ -1010,6 +1010,7 @@ class StorageDomain(APIBase):
         CIFS = vdsm.storage.sd.CIFS_DOMAIN
         POSIXFS = vdsm.storage.sd.POSIXFS_DOMAIN
         GLUSTERFS = vdsm.storage.sd.GLUSTERFS_DOMAIN
+        RBD = vdsm.storage.sd.RBD_DOMAIN
 
     class Classes:
         DATA = vdsm.storage.sd.DATA_DOMAIN

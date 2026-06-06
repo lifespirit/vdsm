@@ -138,6 +138,7 @@ class StorageDomainCache:
 
     def _findUnfetchedDomain(self, sdUUID):
         from vdsm.storage import blockSD
+        from vdsm.storage import rbdSD
         from vdsm.storage import glusterSD
         from vdsm.storage import localFsSD
         from vdsm.storage import nfsSD
@@ -154,7 +155,7 @@ class StorageDomainCache:
                 "Looking up domain {}".format(sdUUID),
                 level=logging.INFO,
                 log=self.log):
-            for mod in (blockSD, glusterSD, localFsSD, nfsSD):
+            for mod in (blockSD, rbdSD, glusterSD, localFsSD, nfsSD):
                 try:
                     return mod.findDomain(sdUUID)
                 except se.StorageDomainDoesNotExist:
@@ -168,10 +169,11 @@ class StorageDomainCache:
 
     def getUUIDs(self):
         from vdsm.storage import blockSD
+        from vdsm.storage import rbdSD
         from vdsm.storage import fileSD
 
         uuids = []
-        for mod in (blockSD, fileSD):
+        for mod in (blockSD, fileSD, rbdSD):
             uuids.extend(mod.getStorageDomainsList())
 
         return uuids

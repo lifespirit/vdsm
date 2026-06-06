@@ -53,6 +53,7 @@ from vdsm.storage import nbd
 from vdsm.storage import nfsSD
 from vdsm.storage import outOfProcess as oop
 from vdsm.storage import qemuimg
+from vdsm.storage import rbdSD
 from vdsm.storage import resourceManager as rm
 from vdsm.storage import sd
 from vdsm.storage import securable
@@ -2094,7 +2095,8 @@ class HSM(object):
                             sd.ISCSI_DOMAIN: blockSD.findDomain,
                             sd.LOCALFS_DOMAIN: localFsSD.findDomain,
                             sd.POSIXFS_DOMAIN: nfsSD.findDomain,
-                            sd.GLUSTERFS_DOMAIN: glusterSD.findDomain}
+                            sd.GLUSTERFS_DOMAIN: glusterSD.findDomain,
+            sd.RBD_DOMAIN: rbdSD.findDomain}
         return SDTypeFindMethod.get(domType)
 
     def _prefetchDomains(self, domType, conObj):
@@ -2124,6 +2126,8 @@ class HSM(object):
             self.log.debug("local _path: %s", lPath)
             uuids = tuple(os.path.basename(d) for d in
                           glob.glob(os.path.join(lPath, uuidPatern)))
+        elif domType is sd.RBD_DOMAIN:
+            uuids = tuple(rbdSD.getStorageDomainsList())
         else:
             uuids = tuple()
             self.log.warn("domType %s does not support prefetch")
@@ -2156,6 +2160,9 @@ class HSM(object):
             se.StorageServerConnectionError(
                 "domType=%s, spUUID=%s, conList=%s" %
                 (domType, spUUID, conList)))
+
+        if domType == sd.RBD_DOMAIN:
+            return rbdSD.connectStorageServer(conList)
 
         results = storageServer.connect(domType, conList)
 
@@ -2220,6 +2227,9 @@ class HSM(object):
             se.StorageServerDisconnectionError(
                 "domType=%s, spUUID=%s, conList=%s" %
                 (domType, spUUID, conList)))
+
+        if domType == sd.RBD_DOMAIN:
+            return rbdSD.disconnectStorageServer(conList)
 
         results = storageServer.disconnect(domType, conList)
 
@@ -2303,6 +2313,8 @@ class HSM(object):
             create = nfsSD.NfsStorageDomain.create
         elif storageType == sd.GLUSTERFS_DOMAIN:
             create = glusterSD.GlusterStorageDomain.create
+        elif storageType == sd.RBD_DOMAIN:
+            create = rbdSD.RBDStorageDomain.create_from_api
         elif storageType == sd.LOCALFS_DOMAIN:
             create = localFsSD.LocalFsStorageDomain.create
         else:

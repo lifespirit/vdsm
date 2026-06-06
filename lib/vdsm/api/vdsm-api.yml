@@ -6263,7 +6263,37 @@ types:
             type: string
         type: object
 
-    StorageDomainCreateArguments: &StorageDomainCreateArguments
+    StorageDomainCreateArgumentsRbd: &StorageDomainCreateArgumentsRbd
+  added: '4.5'
+  description: Creation arguments for Ceph RBD Storage Domains.
+  name: StorageDomainCreateArgumentsRbd
+  properties:
+  - description: Ceph RBD pool name.
+    name: pool
+    type: string
+  - defaultvalue: ''
+    description: Comma-separated Ceph monitor host[:port] list.
+    name: monitors
+    type: string
+  - defaultvalue: ''
+    description: CephX user, with or without client. prefix.
+    name: cephUser
+    type: string
+  - defaultvalue: ''
+    description: CephX key. VDSM installs it as host secret.
+    name: cephKey
+    type: string
+  - defaultvalue: ''
+    description: Optional libvirt Ceph secret UUID.
+    name: secretUUID
+    type: *UUID
+  - defaultvalue: 8192
+    description: Lock image size in MiB.
+    name: lockSizeMiB
+    type: uint
+  type: object
+
+StorageDomainCreateArguments: &StorageDomainCreateArguments
         added: '3.1'
         description: A discriminated record of Storage Domain creation
             parameters.
@@ -6273,6 +6303,7 @@ types:
         - *StorageDomainCreateArgumentsBlock
         - *StorageDomainCreateArgumentsLocal
         - *StorageDomainCreateArgumentsNfs
+- *StorageDomainCreateArgumentsRbd
 
     StorageDomainFileStats: &StorageDomainFileStats
         added: '3.1'
@@ -6383,6 +6414,7 @@ types:
             4: The Storage Domain uses storage on the local file system
             6: The Storage Domain uses posix file system
             7: The Storage Domain uses glusterfs
+  8: The Storage Domain uses Ceph RBD
 
     StorageDomainInfo: &StorageDomainInfo
         added: '3.1'
