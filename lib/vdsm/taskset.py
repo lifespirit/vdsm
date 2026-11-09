@@ -1,9 +1,8 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from vdsm.common import commands
 from . import constants
-
 
 AUTOMATIC = "auto"
 
@@ -41,11 +40,9 @@ def set(pid, cpu_set, all_tasks=False):
     if all_tasks:
         command.append("--all-tasks")
 
-    command.extend((
-                   '--pid',
-                   '--cpu-list', ','.join(str(i) for i in cpu_set),
-                   str(pid)
-                   ))
+    command.extend(
+        ('--pid', '--cpu-list', ','.join(str(i) for i in cpu_set), str(pid))
+    )
 
     commands.run(command, reset_cpu_affinity=False)
 

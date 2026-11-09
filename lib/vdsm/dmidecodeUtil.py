@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from vdsm.common import cache
@@ -30,8 +30,14 @@ def getSystemInfo():
 def getHardwareInfoStructure():
     dmiInfo = getSystemInfo()
     sysStruct = {}
-    for k in ('Manufacturer', 'Product Name', 'Version', 'Serial Number',
-              'UUID', 'Family'):
+    for k in (
+        'Manufacturer',
+        'Product Name',
+        'Version',
+        'Serial Number',
+        'UUID',
+        'Family',
+    ):
         val = dmiInfo.get(k, None)
         if val not in [None, 'Not Specified']:
             sysStruct[('system' + k).replace(' ', '')] = val.decode('utf-8')

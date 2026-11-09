@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from vdsm import virtsysprep
@@ -21,6 +21,6 @@ class VirtSysprepTests(TestCaseBase):
     @MonkeyPatch(virtsysprep, '_VIRTSYSPREP', FakeCommand)
     def test_raise_error_on_failure(self):
 
-        self.assertRaises(cmdutils.Error,
-                          virtsysprep.sysprep,
-                          BLANK_UUID, [FAKE_VOLUME])
+        self.assertRaises(
+            cmdutils.Error, virtsysprep.sysprep, BLANK_UUID, [FAKE_VOLUME]
+        )

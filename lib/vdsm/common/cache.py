@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import functools
@@ -12,6 +12,7 @@ class memoized(object):
 
     Adaptation from http://wiki.python.org/moin/PythonDecoratorLibrary#Memoize
     """
+
     def __init__(self, func):
         self.func = func
         self.cache = {}

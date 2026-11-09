@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 """
@@ -42,13 +42,10 @@ SUPPORTED_DRIVERS = (
     # Drivers tested by the oVirt team
     "rbd",
     "iscsi",
-
     # Tested by Muli Ben-Yehuda <info (at) lightbitslabs.com>
     "lightos",
-
     # Tested by Moritz Wanzenböck <technik+ovirt (at) linbit.com>
     "local",
-
     # Tested by Viktor Ivanov <info (at) storpool.com>
     "storpool",
 )
@@ -87,10 +84,13 @@ def attach_volume(sd_id, vol_id, connection_info):
     """
     db = managedvolumedb.open()
     with closing(db):
-        _add_volume(db, vol_id, connection_info)
+        _add_volume(db, sd_id, vol_id, connection_info)
 
-        log.debug("Starting attach volume %s connection_info=%s",
-                  vol_id, connection_info)
+        log.debug(
+            "Starting attach volume %s connection_info=%s",
+            vol_id,
+            connection_info,
+        )
 
         try:
             vol_info = {"connection_info": connection_info}
@@ -101,13 +101,15 @@ def attach_volume(sd_id, vol_id, connection_info):
                     vol_id,
                     path=path,
                     attachment=attachment,
-                    multipath_id=attachment.get("multipath_id"))
+                    multipath_id=attachment.get("multipath_id"),
+                )
                 _invalidate_lvm_devices(attachment)
                 volume_type = connection_info["driver_volume_type"]
                 if volume_type not in SUPPORTED_DRIVERS:
                     raise se.UnsupportedOperation(
                         "Unsupported volume type, supported types are: "
-                        f"{SUPPORTED_DRIVERS}")
+                        f"{SUPPORTED_DRIVERS}"
+                    )
 
                 run_link = _add_run_link(sd_id, vol_id, path)
                 _add_udev_rule(sd_id, vol_id, path)
@@ -119,8 +121,14 @@ def attach_volume(sd_id, vol_id, connection_info):
             raise
     log.debug("Attached volume %s attachment=%s", vol_id, attachment)
 
-    return {"result": {'attachment': attachment, 'path': path,
-                       'vol_id': vol_id, 'managed_path': run_link}}
+    return {
+        "result": {
+            'attachment': attachment,
+            'path': path,
+            'vol_id': vol_id,
+            'managed_path': run_link,
+        }
+    }
 
 
 @requires_os_brick
@@ -184,7 +192,8 @@ def volumes_info(vol_ids=()):
 def run_helper(sub_cmd, vol_info=None):
     if os.geteuid() != 0:
         return supervdsm.getProxy().managedvolume_run_helper(
-            sub_cmd, vol_info=vol_info)
+            sub_cmd, vol_info=vol_info
+        )
     try:
         adapter = None
         cmd_input = None
@@ -194,12 +203,11 @@ def run_helper(sub_cmd, vol_info=None):
         helper = HELPER
         if adapter:
             helper = f"{HELPER}-{adapter}"
-            if not (
-                os.path.exists(helper) and os.access(helper, os.X_OK)
-            ):
+            if not (os.path.exists(helper) and os.access(helper, os.X_OK)):
                 raise se.ManagedVolumeHelperFailed(
                     f"Helper for adapter '{adapter}' not found or"
-                    f" not executable at '{helper}'")
+                    f" not executable at '{helper}'"
+                )
         cmd = [helper, sub_cmd]
         result = commands.run(cmd, input=cmd_input)
     except cmdutils.Error as e:
@@ -213,9 +221,14 @@ def run_helper(sub_cmd, vol_info=None):
 # Private helpers
 
 
-def _add_volume(db, vol_id, connection_info):
+def _add_volume(db, sd_id, vol_id, connection_info):
     """
-    Add volume to db, verifing existing entry.
+    Add volume to db, verifying existing entry.
+
+    The VDSM database persists across reboots but the run link does
+    not (/run is tmpfs), so an entry without a run link is stale and
+    safe to drop. Checking the device path instead would misdetect
+    drivers that restore their paths during boot (issue #433).
     """
     try:
         db.add_volume(vol_id, connection_info)
@@ -223,11 +236,21 @@ def _add_volume(db, vol_id, connection_info):
         vol_info = db.get_volume(vol_id)
         if vol_info["connection_info"] != connection_info:
             raise se.ManagedVolumeConnectionMismatch(
-                vol_id, vol_info["connection_info"], connection_info)
+                vol_id, vol_info["connection_info"], connection_info
+            )
 
-        if "path" in vol_info and os.path.exists(vol_info["path"]):
+        if _run_link_exists(sd_id, vol_id):
             raise se.ManagedVolumeAlreadyAttached(
-                vol_id, vol_info["path"], vol_info.get('attachment'))
+                vol_id, vol_info["path"], vol_info.get('attachment')
+            )
+
+        log.warning(
+            "Removing stale DB entry for vol_id=%s (no run link in "
+            "current boot session)",
+            vol_id,
+        )
+        db.remove_volume(vol_id)
+        db.add_volume(vol_id, connection_info)
 
 
 def _resolve_path(vol_id, connection_info, attachment):
@@ -247,8 +270,7 @@ def _resolve_path(vol_id, connection_info, attachment):
         # StorPool returns a full device path
         return attachment["path"]
     else:
-        log.warning("Managed Volume without multipath info: %s",
-                    attachment)
+        log.warning("Managed Volume without multipath info: %s", attachment)
         return attachment["path"]
 
 
@@ -286,8 +308,7 @@ def _silent_detach(connection_info, attachment):
     """
     Detach volume during cleanup flow, logging errors.
     """
-    vol_info = {"connection_info": connection_info,
-                "attachment": attachment}
+    vol_info = {"connection_info": connection_info, "attachment": attachment}
     try:
         run_helper("detach", vol_info)
     except Exception:
@@ -309,8 +330,7 @@ def _remove_udev_rule(sd_id, vol_id):
         proxy = supervdsm.getProxy()
         proxy.remove_managed_udev_rule(sd_id, vol_id)
     except Exception:
-        log.exception(
-            "Failed to remove udev rule for volume %s", vol_id)
+        log.exception("Failed to remove udev rule for volume %s", vol_id)
 
 
 def _add_run_link(sd_id, vol_id, path):
@@ -318,6 +338,10 @@ def _add_run_link(sd_id, vol_id, path):
     run_path = _run_link(sd_id, vol_id)
     os.symlink(path, run_path)
     return run_path
+
+
+def _run_link_exists(sd_id, vol_id):
+    return os.path.lexists(_run_link(sd_id, vol_id))
 
 
 def _remove_run_link(sd_id, vol_id):

@@ -1,8 +1,7 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import errno
-import pytest
 import socket
 import ssl
 import threading
@@ -12,7 +11,6 @@ from contextlib import contextmanager
 
 from yajsonrpc.betterAsyncore import Reactor
 from vdsm.protocoldetector import MultiProtocolAcceptor
-from testValidation import broken_on_ci
 from testlib import VdsmTestCase, expandPermutations, permutations
 
 from integration.sslhelper import generate_key_cert_pair, create_ssl_context
@@ -57,7 +55,7 @@ class Detector(object):
 
 
 class Echo(Detector):
-    """ A detector echoing sent line """
+    """A detector echoing sent line"""
 
     NAME = "echo"
     REQUIRED_SIZE = len(NAME)
@@ -67,7 +65,7 @@ class Echo(Detector):
 
 
 class Uppercase(Detector):
-    """ A detector echoing sent line in UPPERCASE """
+    """A detector echoing sent line in UPPERCASE"""
 
     NAME = "uppercase"
     REQUIRED_SIZE = len(NAME)
@@ -104,12 +102,13 @@ class AcceptorTests(VdsmTestCase):
 
     # Testing
 
-    @pytest.mark.xfail(reason="Test fails on CentOS 9 Python")
     def test_reject_ssl_accept_error(self):
         self.start_acceptor(use_ssl=True)
         with self.connect(use_ssl=False) as client:
             client.sendall(b"this is not ssl handshake\n")
-            self.assertRaises(socket.error, client.recv, self.BUFSIZE)
+            with self.assertRaises(socket.error):
+                while client.recv(self.BUFSIZE):
+                    pass
 
     @permutations(PERMUTATIONS)
     def test_reject_unknown_protocol(self, use_ssl):
@@ -127,7 +126,6 @@ class AcceptorTests(VdsmTestCase):
         data = b"echo testing is fun\n"
         self.check_detect(use_ssl, data, data)
 
-    @broken_on_ci("IPv6 not supported on travis", name="TRAVIS_CI")
     @permutations(PERMUTATIONS)
     def test_detect_echo6(self, use_ssl):
         self.start_acceptor(use_ssl, address='::1')
@@ -152,7 +150,6 @@ class AcceptorTests(VdsmTestCase):
         self.check_slow_client(use_ssl)
 
     @permutations(PERMUTATIONS)
-    @broken_on_ci("Fail randomly", name="OVIRT_CI")
     def test_detect_slow_client_concurrency(self, use_ssl):
         self.start_acceptor(use_ssl)
         self.check_concurrently(self.check_slow_client, use_ssl)
@@ -208,16 +205,14 @@ class AcceptorTests(VdsmTestCase):
     def start_acceptor(self, use_ssl, address='127.0.0.1'):
         self.reactor = Reactor()
         self.acceptor = MultiProtocolAcceptor(
-            self.reactor,
-            address,
-            0,
-            sslctx=self.ssl_ctx if use_ssl else None
+            self.reactor, address, 0, sslctx=self.ssl_ctx if use_ssl else None
         )
         self.acceptor.TIMEOUT = 1
         self.acceptor.add_detector(Echo())
         self.acceptor.add_detector(Uppercase())
-        self.acceptor_address = \
-            self.acceptor._acceptor.socket.getsockname()[0:2]
+        self.acceptor_address = self.acceptor._acceptor.socket.getsockname()[
+            0:2
+        ]
         t = threading.Thread(target=self.reactor.process_requests)
         t.daemon = True
         t.start()
@@ -225,8 +220,9 @@ class AcceptorTests(VdsmTestCase):
     @contextmanager
     def connect(self, use_ssl):
         host, port = self.acceptor_address
-        addrinfo = socket.getaddrinfo(host, port,
-                                      socket.AF_UNSPEC, socket.SOCK_STREAM)
+        addrinfo = socket.getaddrinfo(
+            host, port, socket.AF_UNSPEC, socket.SOCK_STREAM
+        )
         family, socktype, proto, _, sockaddr = addrinfo[0]
         s = socket.socket(family, socktype, proto)
         try:

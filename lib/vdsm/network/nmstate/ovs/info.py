@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import ipaddress
@@ -18,7 +18,6 @@ from ..schema import InterfaceIP
 from ..schema import InterfaceType
 from ..schema import OvsBridgeSchema
 from ..schema import Route
-
 
 EMPTY_INFO = {
     NetInfoIfaceSchema.IPv4.PRIMARY_ADDR: '',

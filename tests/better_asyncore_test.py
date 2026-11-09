@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import socket
@@ -39,8 +39,9 @@ class TestReactor(TestCaseBase):
 
     def test_close(self):
         reactor = Reactor()
-        thread = concurrent.thread(reactor.process_requests,
-                                   name='test ractor')
+        thread = concurrent.thread(
+            reactor.process_requests, name='test ractor'
+        )
         thread.start()
         s1, s2 = socket.socketpair()
         with closing(s2):

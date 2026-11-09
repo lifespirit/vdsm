@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from vdsm import virtsparsify
@@ -10,7 +10,7 @@ from . import base
 
 
 class SparsifyException(VdsmException):
-    ''' Base class for sparsify exceptions '''
+    '''Base class for sparsify exceptions'''
 
 
 class VolumeIsNotLeafException(SparsifyException):

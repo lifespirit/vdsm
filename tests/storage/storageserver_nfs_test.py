@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import pytest
@@ -7,16 +7,18 @@ from vdsm.storage.storageServer import NFSConnection
 
 
 def test_extra_options():
-    c = NFSConnection("id", "address", version="4.2",
-                      extraOptions="extra,options")
+    c = NFSConnection(
+        "id", "address", version="4.2", extraOptions="extra,options"
+    )
     options = c._mountCon.options.split(",")
     assert "extra" in options
     assert "options" in options
 
 
 def test_extra_options_filter_empty():
-    c = NFSConnection("id", "address", version="4.2",
-                      extraOptions=",extra,,options,")
+    c = NFSConnection(
+        "id", "address", version="4.2", extraOptions=",extra,,options,"
+    )
     options = c._mountCon.options.split(",")
     assert "" not in options
     assert "extra" in options

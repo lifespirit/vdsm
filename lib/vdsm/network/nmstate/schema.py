@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from libnmstate.schema import Bond as BondSchema
@@ -15,7 +15,6 @@ from libnmstate.schema import OvsDB
 from libnmstate.schema import Route
 from libnmstate.schema import RouteRule
 from libnmstate.schema import VLAN as Vlan
-
 
 __all__ = [
     'BondSchema',

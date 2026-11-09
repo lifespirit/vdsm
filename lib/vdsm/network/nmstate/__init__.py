@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 # Re-export public API
@@ -27,7 +27,6 @@ from .schema import OvsDB
 from .schema import Route
 from .schema import RouteRule
 from .schema import Vlan
-
 
 __all__ = [
     'add_dynamic_source_route_rules',

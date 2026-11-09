@@ -1,11 +1,15 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from . import expose
 
-from vdsm.mkimage import getFileName, injectFilesToFs, mkFloppyFs, \
-    mkIsoFs, removeFs
-
+from vdsm.mkimage import (
+    getFileName,
+    injectFilesToFs,
+    mkFloppyFs,
+    mkIsoFs,
+    removeFs,
+)
 
 expose(getFileName)
 expose(injectFilesToFs)

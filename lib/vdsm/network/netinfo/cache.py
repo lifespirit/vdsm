@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import errno
@@ -16,7 +16,6 @@ from . import nics
 from .addresses import getIpAddrs, getIpInfo, is_ipv6_local_auto
 from .qos import report_network_qos
 from .routes import get_routes, get_gateway, is_default_route
-
 
 # By default all networks are 'legacy', it can be optionaly changed to 'ovs' in
 # OVS capabilities handling.

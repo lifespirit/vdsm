@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import uuid
@@ -152,10 +152,7 @@ def test_irs_prepared_volumes():
     res = irs.prepareImage(sdUUID, spUUID, imgUUID, leafUUID)
     assert (sdUUID, imgUUID, leafUUID) in irs.prepared_volumes
     assert res == {
-        "status": {
-            "code": 0,
-            "message": "Done"
-        },
+        "status": {"code": 0, "message": "Done"},
         "path": expected_path,
         "info": {
             "type": storage.DISK_TYPE.FILE,
@@ -167,8 +164,5 @@ def test_irs_prepared_volumes():
     res = irs.teardownImage(sdUUID, spUUID, imgUUID, leafUUID)
     assert (sdUUID, imgUUID, leafUUID) not in irs.prepared_volumes
     assert res == {
-        "status": {
-            "code": 0,
-            "message": "Done"
-        },
+        "status": {"code": 0, "message": "Done"},
     }

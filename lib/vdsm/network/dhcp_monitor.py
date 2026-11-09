@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from contextlib import contextmanager
@@ -8,7 +8,6 @@ import threading
 from vdsm.common import concurrent
 from vdsm.network.netlink import monitor
 from vdsm.network.ip.address import IPAddressData
-
 
 _monitor_instance = None
 _monitor_lock = threading.Lock()

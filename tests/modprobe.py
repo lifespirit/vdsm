@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import os
@@ -9,9 +9,10 @@ import pytest
 from vdsm.common import cmdutils
 from vdsm.common import commands
 
-modprobe = cmdutils.CommandPath("modprobe",
-                                "/usr/sbin/modprobe",  # Fedora, EL7
-                                )
+modprobe = cmdutils.CommandPath(
+    "modprobe",
+    "/usr/sbin/modprobe",  # Fedora, EL7
+)
 
 
 def RequireDummyMod(f):
@@ -53,5 +54,7 @@ def _validate_module(name):
         try:
             commands.run(cmd_modprobe, sudo=True)
         except cmdutils.Error as e:
-            pytest.skip("This test requires %s module "
-                        "(failed to load module: %s)" % (name, e))
+            pytest.skip(
+                "This test requires %s module "
+                "(failed to load module: %s)" % (name, e)
+            )

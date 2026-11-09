@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from contextlib import contextmanager
@@ -972,9 +972,7 @@ def _get_network_iface_name(net_name, net_attrs):
     return (
         net_name
         if bridged
-        else '{}.{}'.format(base_iface, vlan)
-        if vlan
-        else base_iface
+        else '{}.{}'.format(base_iface, vlan) if vlan else base_iface
     )
 
 

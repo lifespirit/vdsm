@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from testlib import VdsmTestCase
@@ -41,8 +41,9 @@ class TestContextException(VdsmTestCase):
 
     def test_context_reason_and_kwargs(self):
         e = ContextException("not hot enough", temperature=42)
-        self.assertEqual(e.context,
-                         dict(reason="not hot enough", temperature=42))
+        self.assertEqual(
+            e.context, dict(reason="not hot enough", temperature=42)
+        )
 
     def test_str(self):
         e = ContextException("not hot enough", temperature=42)

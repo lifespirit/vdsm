@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 """
@@ -11,6 +11,7 @@ TODO: The configuration in these specific entries in the logger.config.in
 should be drop, letting the application define them (without exposing this
 to users).
 """
+
 from vdsm.common.logutils import (  # NOQA: F401 (unused import)
     TimezoneFormatter,
     UserGroupEnforcingHandler,

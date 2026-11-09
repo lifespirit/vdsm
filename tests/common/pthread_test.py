@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import threading
@@ -11,9 +11,11 @@ from testlib import VdsmTestCase as TestCaseBase
 class PthreadNameTests(TestCaseBase):
 
     def test_name_too_long(self):
-        self.assertRaises(ValueError,
-                          pthread.setname,
-                          "any name longer than fifteen ASCII characters")
+        self.assertRaises(
+            ValueError,
+            pthread.setname,
+            "any name longer than fifteen ASCII characters",
+        )
 
     def test_name_is_set(self):
         NAME = "test-name"

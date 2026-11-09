@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 include $(top_srcdir)/build-aux/Makefile.subs
@@ -17,7 +17,7 @@ dist_supervdsm_api_PYTHON = \
 	nbd.py \
 	network.py \
 	rbd.py \
-sanlock_direct.py \
+	sanlock_direct.py \
 	saslpasswd2.py \
 	systemctl.py \
 	test.py \

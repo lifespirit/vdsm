@@ -1,6 +1,6 @@
 #!/bin/bash -xe
 
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 source tests/network/common.sh
@@ -62,9 +62,6 @@ function clone_nmstate {
     "
 }
 
-function enable_ipv6 {
-    container_exec "echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6"
-}
 
 options=$(getopt --options "" \
     --long help,shell,switch-type:,nmstate-pr:,nmstate-source:,pytest-args:\
@@ -111,7 +108,7 @@ done
 
 load_kernel_modules
 
-CONTAINER_ID="$($CONTAINER_CMD run --privileged -d -v $PROJECT_PATH:$CONTAINER_WORKSPACE:Z $nmstate_mount --env PYTHONPATH=lib --env CI $CONTAINER_IMAGE:$IMAGE_TAG)"
+CONTAINER_ID="$($CONTAINER_CMD run --privileged -d -v $PROJECT_PATH:$CONTAINER_WORKSPACE:Z $nmstate_mount --env PYTHONPATH=lib --env OVIRT_CI $CONTAINER_IMAGE:$IMAGE_TAG)"
 trap remove_container EXIT
 
 wait_for_active_service "dbus"
@@ -137,11 +134,6 @@ elif [ $SWITCH_TYPE == $SWITCH_TYPE_OVS ];then
     start_service "openvswitch"
     restart_service "NetworkManager"
     SWITCH_TYPE="ovs_switch"
-fi
-
-if [ "$TRAVIS" == "true" ]; then
-    # Workaround for https://github.com/travis-ci/travis-ci/issues/8891
-    enable_ipv6
 fi
 
 if [ -n "$debug_shell" ];then

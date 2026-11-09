@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 """
@@ -22,10 +22,10 @@ import subprocess
 from vdsm import constants
 from vdsm.common import cmdutils
 from vdsm.common import commands
+from vdsm.storage import constants as sc
 from vdsm.storage import fileUtils
 from vdsm.storage import lvmconf
 from vdsm.storage import lvmfilter
-
 
 _LVM_DEVICES_DIR = "/etc/lvm/devices"
 
@@ -105,20 +105,93 @@ def _configure_devices_file(enable=True):
 
 def _create_system_devices(vgs):
     """
-    Import devices of provided VGs into LVM devices file.
+    Import the VGs in `vgs` (the VGs that back the host's mounts, from
+    lvmfilter.find_lvm_mounts) plus any other VGs already visible to
+    lvm, so external storage VGs are not evicted when vdsm rebuilds
+    the devices file.
     """
-    if not vgs:
-        # Create empty devices file if no VGs are provided.
-        devices_file = _get_devices_file_path()
-        now = datetime.datetime.now()
-        data = (f"# Created by Vdsm pid {os.getpid()} at "
-                f"{now.strftime('%a %b %d %H:%M:%S %Y')}\n")
+    devices_file = _get_devices_file_path()
 
-        os.makedirs(os.path.dirname(devices_file), exist_ok=True)
-        fileUtils.atomic_write(devices_file, data.encode("utf-8"))
-    else:
-        for vg in vgs:
-            _run_vgimportdevices(vg)
+    existing_vgs = ()
+    if not _devices_file_has_entries(devices_file):
+        # No device entries yet. List visible VGs so external storage
+        # is preserved on the use_devicesfile=1 transition.
+        existing_vgs = _list_all_visible_vgs()
+        if not existing_vgs and not vgs:
+            # No VGs anywhere. Drop a header so lvm does not scan every
+            # device under use_devicesfile=1.
+            now = datetime.datetime.now()
+            data = (
+                f"# Created by Vdsm pid {os.getpid()} at "
+                f"{now.strftime('%a %b %d %H:%M:%S %Y')}\n"
+            )
+            os.makedirs(os.path.dirname(devices_file), exist_ok=True)
+            fileUtils.atomic_write(devices_file, data.encode("utf-8"))
+            return
+
+    # Import visible and requested VGs, filtering out duplicate VGs.
+    for vg in sorted(set(existing_vgs) | set(vgs)):
+        _run_vgimportdevices(vg)
+
+
+def _devices_file_has_entries(devices_file):
+    """
+    Return True if the devices file records at least one device entry
+    (an IDTYPE= line). A missing or empty file, or one holding only
+    comments and bare lvm metadata (VERSION=, PRODUCT_UUID=) with no
+    device entries, counts as no entries.
+    """
+    try:
+        with open(devices_file) as f:
+            for line in f:
+                if line.strip().startswith("IDTYPE="):
+                    return True
+    except FileNotFoundError:
+        return False
+    return False
+
+
+def _list_all_visible_vgs():
+    """
+    Return the sorted VG names lvm can see, bypassing the devices file
+    so VGs created while use_devicesfile was off are still surfaced.
+    Skips oVirt SD VGs (sc.STORAGE_DOMAIN_TAG), like
+    lvmfilter.find_lvm_mounts.
+    """
+    cmd = [
+        constants.EXT_LVM,
+        'vgs',
+        '--noheadings',
+        '--readonly',
+        '-o',
+        'vg_name,vg_tags',
+        '--separator',
+        '|',
+        '--config',
+        'devices { use_devicesfile = 0 filter = ["a|.*|"] }',
+    ]
+
+    p = commands.start(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = commands.communicate(p)
+
+    if p.returncode != 0:
+        raise cmdutils.Error(cmd, p.returncode, out, err)
+
+    result = set()
+    for line in out.decode("utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # vgs prints "vg_name|tag1,tag2,..." with our --separator.
+        name, _, tags = line.partition("|")
+        name = name.strip()
+        if not name:
+            continue
+        if sc.STORAGE_DOMAIN_TAG in tags.split(","):
+            log.debug("Skipping oVirt-tagged VG %r", name)
+            continue
+        result.add(name)
+    return sorted(result)
 
 
 def _run_vgimportdevices(vg):
@@ -129,18 +202,15 @@ def _run_vgimportdevices(vg):
     devices won't be imported. If the filter is wrong, we may miss some
     devices. To avoid such situation, set the filter to enable all the devices.
     """
-    cmd = [constants.EXT_LVM,
-           'vgimportdevices',
-           vg,
-           '--config',
-           'devices { use_devicesfile = 1 filter = ["a|.*|"] }'
-           ]
+    cmd = [
+        constants.EXT_LVM,
+        'vgimportdevices',
+        vg,
+        '--config',
+        'devices { use_devicesfile = 1 filter = ["a|.*|"] }',
+    ]
 
-    p = commands.start(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
+    p = commands.start(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out, err = commands.communicate(p)
 
     if p.returncode == 0 and err:
@@ -159,11 +229,7 @@ def _run_check():
     """
     cmd = [constants.EXT_LVM, 'lvmdevices', "--check"]
 
-    p = commands.start(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
+    p = commands.start(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out, err = commands.communicate(p)
 
     if p.returncode == 0 and err:

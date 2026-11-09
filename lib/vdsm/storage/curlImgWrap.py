@@ -1,12 +1,14 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from vdsm.common import cmdutils
 from vdsm.common import commands
 from vdsm import constants
 
-_curl = cmdutils.CommandPath("curl",
-                             "/usr/bin/curl", )  # Fedora, EL6
+_curl = cmdutils.CommandPath(
+    "curl",
+    "/usr/bin/curl",
+)  # Fedora, EL6
 
 CURL_OPTIONS = ["-q", "--silent", "--fail", "--show-error"]
 
@@ -20,7 +22,11 @@ class CurlError(Exception):
 
     def __str__(self):
         return "ecode=%s, stdout=%s, stderr=%s, message=%s" % (
-            self.ecode, self.stdout, self.stderr, self.msg)
+            self.ecode,
+            self.stdout,
+            self.stderr,
+            self.msg,
+        )
 
 
 def _headersToOptions(headers):

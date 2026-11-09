@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import base64
@@ -99,6 +99,7 @@ class TestEnumDefault:
         def invalid_default():
             class Cls(properties.Owner):
                 value = properties.Enum(values=("1", "2", "3"), default="4")
+
         with pytest.raises(ValueError):
             invalid_default()
 

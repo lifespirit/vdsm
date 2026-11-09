@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from contextlib import closing, contextmanager
@@ -24,7 +24,6 @@ from . import libnl
 from .addr import _addr_info
 from .link import _link_info
 from .route import _route_info
-
 
 E_NOT_RUNNING = 1
 E_TIMEOUT = 2

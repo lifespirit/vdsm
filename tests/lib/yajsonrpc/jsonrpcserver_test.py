@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import logging
@@ -10,24 +10,24 @@ from testValidation import slowtest
 from vdsm import executor
 from vdsm.common import exception
 
-from testlib import VdsmTestCase as TestCaseBase, \
-    expandPermutations, \
-    permutations, \
-    dummyTextGenerator
-
-from testValidation import broken_on_ci
+from testlib import (
+    VdsmTestCase as TestCaseBase,
+    expandPermutations,
+    permutations,
+    dummyTextGenerator,
+)
 
 from integration.sslhelper import generate_key_cert_pair, create_ssl_context
 
-from integration.jsonRpcHelper import \
-    constructClient
+from integration.jsonRpcHelper import constructClient
 
 from yajsonrpc import JsonRpcRequest
-from yajsonrpc.exception import \
-    JsonRpcErrorBase, \
-    JsonRpcMethodNotFoundError, \
-    JsonRpcNoResponseError, \
-    JsonRpcInternalError
+from yajsonrpc.exception import (
+    JsonRpcErrorBase,
+    JsonRpcMethodNotFoundError,
+    JsonRpcNoResponseError,
+    JsonRpcInternalError,
+)
 
 
 CALL_TIMEOUT = 3
@@ -42,9 +42,11 @@ class _DummyBridge(object):
     cif = None
 
     def getBridgeMethods(self):
-        return ((self.echo, 'echo'),
-                (self.ping, 'ping'),
-                (self.slow_response, 'slow_response'))
+        return (
+            (self.echo, 'echo'),
+            (self.ping, 'ping'),
+            (self.slow_response, 'slow_response'),
+        )
 
     def dispatch(self, method):
         try:
@@ -96,10 +98,12 @@ class JsonRpcServerTests(TestCaseBase):
             self.ssl_ctx = create_ssl_context(key_file, cert_file)
             super(TestCaseBase, self).run(result)
 
-    def _callTimeout(self, client, methodName, params=None, rid=None,
-                     timeout=None):
-        responses = client.call(JsonRpcRequest(methodName, params, rid),
-                                timeout=CALL_TIMEOUT)
+    def _callTimeout(
+        self, client, methodName, params=None, rid=None, timeout=None
+    ):
+        responses = client.call(
+            JsonRpcRequest(methodName, params, rid), timeout=CALL_TIMEOUT
+        )
         if not responses:
             raise JsonRpcNoResponseError(method=methodName)
         resp = responses[0]
@@ -135,7 +139,6 @@ class JsonRpcServerTests(TestCaseBase):
         return res
 
     @permutations(USE_SSL)
-    @broken_on_ci(reason="Fails randomly in CI", name="TRAVIS_CI")
     def testMethodCallArgList(self, use_ssl):
         data = dummyTextGenerator(1024)
         ssl_ctx = self.ssl_ctx if use_ssl else None
@@ -144,11 +147,11 @@ class JsonRpcServerTests(TestCaseBase):
         with constructClient(self.log, bridge, ssl_ctx) as clientFactory:
             with self._client(clientFactory) as client:
                 self.log.info("Calling 'echo'")
-                self.assertEqual(self._callTimeout(client, "echo",
-                                                   (data,), CALL_ID), data)
+                self.assertEqual(
+                    self._callTimeout(client, "echo", (data,), CALL_ID), data
+                )
 
     @permutations(USE_SSL)
-    @broken_on_ci("fails randomly in CI", name="TRAVIS_CI")
     def testMethodCallArgDict(self, use_ssl):
         data = dummyTextGenerator(1024)
         ssl_ctx = self.ssl_ctx if use_ssl else None
@@ -156,11 +159,12 @@ class JsonRpcServerTests(TestCaseBase):
 
         with constructClient(self.log, bridge, ssl_ctx) as clientFactory:
             with self._client(clientFactory) as client:
-                self.assertEqual(self._callTimeout(client, "echo",
-                                 {'text': data}, CALL_ID), data)
+                self.assertEqual(
+                    self._callTimeout(client, "echo", {'text': data}, CALL_ID),
+                    data,
+                )
 
     @permutations(USE_SSL)
-    @broken_on_ci("fails randomly in CI", name="TRAVIS_CI")
     def testMethodMissingMethod(self, use_ssl):
         missing_method = "I_DO_NOT_EXIST :("
         ssl_ctx = self.ssl_ctx if use_ssl else None
@@ -169,16 +173,15 @@ class JsonRpcServerTests(TestCaseBase):
         with constructClient(self.log, bridge, ssl_ctx) as clientFactory:
             with self._client(clientFactory) as client:
                 with self.assertRaises(JsonRpcErrorBase) as cm:
-                    self._callTimeout(client, missing_method, [],
-                                      CALL_ID)
+                    self._callTimeout(client, missing_method, [], CALL_ID)
 
                 self.assertEqual(
                     cm.exception.code,
-                    JsonRpcMethodNotFoundError(method=missing_method).code)
+                    JsonRpcMethodNotFoundError(method=missing_method).code,
+                )
                 self.assertIn(missing_method, cm.exception.msg)
 
     @permutations(USE_SSL)
-    @broken_on_ci("fails randomly in CI", name="TRAVIS_CI")
     def testMethodBadParameters(self, use_ssl):
         # Without a schema the server returns an internal error
         ssl_ctx = self.ssl_ctx if use_ssl else None
@@ -187,22 +190,20 @@ class JsonRpcServerTests(TestCaseBase):
         with constructClient(self.log, bridge, ssl_ctx) as clientFactory:
             with self._client(clientFactory) as client:
                 with self.assertRaises(JsonRpcErrorBase) as cm:
-                    self._callTimeout(client, "echo", [],
-                                      CALL_ID)
+                    self._callTimeout(client, "echo", [], CALL_ID)
 
-                self.assertEqual(cm.exception.code,
-                                 JsonRpcInternalError().code)
+                self.assertEqual(
+                    cm.exception.code, JsonRpcInternalError().code
+                )
 
     @permutations(USE_SSL)
-    @broken_on_ci("fails randomly in CI", name="TRAVIS_CI")
     def testMethodReturnsNullAndServerReturnsTrue(self, use_ssl):
         ssl_ctx = self.ssl_ctx if use_ssl else None
         bridge = _DummyBridge()
 
         with constructClient(self.log, bridge, ssl_ctx) as clientFactory:
             with self._client(clientFactory) as client:
-                res = self._callTimeout(client, "ping", [],
-                                        CALL_ID)
+                res = self._callTimeout(client, "ping", [], CALL_ID)
                 self.assertEqual(res, True)
 
     @slowtest
@@ -216,12 +217,12 @@ class JsonRpcServerTests(TestCaseBase):
                 with self.assertRaises(JsonRpcErrorBase) as cm:
                     self._callTimeout(client, "slow_response", [], CALL_ID)
 
-                self.assertEqual(cm.exception.code,
-                                 JsonRpcNoResponseError().code)
+                self.assertEqual(
+                    cm.exception.code, JsonRpcNoResponseError().code
+                )
 
     @MonkeyPatch(executor.Executor, 'dispatch', dispatch)
     @permutations(USE_SSL)
-    @broken_on_ci("fails randomly in CI", name="TRAVIS_CI")
     def testFullExecutor(self, use_ssl):
         ssl_ctx = self.ssl_ctx if use_ssl else None
         bridge = _DummyBridge()
@@ -231,11 +232,11 @@ class JsonRpcServerTests(TestCaseBase):
                 with self.assertRaises(JsonRpcErrorBase) as cm:
                     self._callTimeout(client, "no_method", [], CALL_ID)
 
-                self.assertEqual(cm.exception.code,
-                                 JsonRpcInternalError().code)
+                self.assertEqual(
+                    cm.exception.code, JsonRpcInternalError().code
+                )
 
     @permutations(USE_SSL)
-    @broken_on_ci("fails randomly in CI", name="TRAVIS_CI")
     def testClientSubscribe(self, use_ssl):
         ssl_ctx = self.ssl_ctx if use_ssl else None
         bridge = _DummyBridge()
@@ -245,8 +246,7 @@ class JsonRpcServerTests(TestCaseBase):
                 event_queue = queue.Queue()
                 sub = client.subscribe(EVENT_TOPIC, event_queue)
 
-                res = self._callTimeout(client, "send_event", [],
-                                        CALL_ID)
+                res = self._callTimeout(client, "send_event", [], CALL_ID)
                 self.assertEqual(res, 'sent')
                 client.unsubscribe(sub)
 
@@ -258,7 +258,6 @@ class JsonRpcServerTests(TestCaseBase):
                 self.assertEqual(event_params['content'], True)
 
     @permutations(USE_SSL)
-    @broken_on_ci("fails randomly in CI", name="TRAVIS_CI")
     def testClientNotify(self, use_ssl):
         ssl_ctx = self.ssl_ctx if use_ssl else None
         bridge = _DummyBridge()
@@ -269,8 +268,12 @@ class JsonRpcServerTests(TestCaseBase):
                 custom_topic = 'custom.topic'
                 sub = client.subscribe(custom_topic, event_queue)
 
-                client.notify('vdsm.event', custom_topic,
-                              bridge.event_schema, {'content': True})
+                client.notify(
+                    'vdsm.event',
+                    custom_topic,
+                    bridge.event_schema,
+                    {'content': True},
+                )
 
                 # Waiting for event before unsubscribing, to make sure,
                 # it will be received

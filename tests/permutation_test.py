@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 """
@@ -32,9 +32,7 @@ def mysum(lst, strategy):
         return s
 
 
-SUM_PREMUTATIONS = (("recursive",),
-                    ("builtin",),
-                    ("loop",))
+SUM_PREMUTATIONS = (("recursive",), ("builtin",), ("loop",))
 
 
 @expandPermutations

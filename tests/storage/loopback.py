@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 """
@@ -88,4 +88,8 @@ class Device(object):
 
     def __repr__(self):
         return "<%s backing_file=%s, path=%s at 0x%x>" % (
-            self.__class__.__name__, self._backing_file, self._path, id(self))
+            self.__class__.__name__,
+            self._backing_file,
+            self._path,
+            id(self),
+        )

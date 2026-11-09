@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import logging
@@ -6,7 +6,6 @@ import os
 
 from vdsm.common import cpuarch
 from . import expose
-
 
 CPU_VULNERABILITY_DIR = '/sys/devices/system/cpu/vulnerabilities'
 
@@ -16,9 +15,11 @@ def getHardwareInfo(*args, **kwargs):
     arch = cpuarch.real()
     if cpuarch.is_x86(arch):
         from vdsm.dmidecodeUtil import getHardwareInfoStructure
+
         return getHardwareInfoStructure()
     elif cpuarch.is_ppc(arch):
         from vdsm.ppc64HardwareInfo import getHardwareInfoStructure
+
         return getHardwareInfoStructure()
     else:
         #  not implemented over other architecture

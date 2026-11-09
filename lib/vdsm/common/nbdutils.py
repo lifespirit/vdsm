@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 
@@ -15,6 +15,7 @@ class UnixAddress(str):
     """
     Unix socket address representation
     """
+
     @property
     def transport(self):
         return "unix"
@@ -34,11 +35,14 @@ class TCPAddress(tuple):
     """
     TCP address representation
     """
+
     def __new__(cls, host, port):
         if port < MIN_PORT or port > MAX_PORT:
             raise ValueError(
                 'Port {} out is valid range {}-{}'.format(
-                    port, MIN_PORT, MAX_PORT))
+                    port, MIN_PORT, MAX_PORT
+                )
+            )
         return tuple.__new__(cls, (host, port))
 
     @property

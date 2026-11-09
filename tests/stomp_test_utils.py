@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import itertools
@@ -122,7 +122,7 @@ class FakeFrameHandler(object):
 
     @property
     def has_outgoing_messages(self):
-        return (len(self._outbox) > 0)
+        return len(self._outbox) > 0
 
     def queue_frame(self, frame):
         self._outbox.append(frame)

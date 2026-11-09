@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from vdsm.virt.vmdevices import hwclass
@@ -19,9 +19,11 @@ class DeviceMixin(object):
         aliases = []
         for device in conf:
             # IOMMU placeholder should be ignored
-            if (device['type'] == hwclass.HOSTDEV and
-                    'specParams' in device and
-                    device['specParams'].get('iommuPlaceholder', False)):
+            if (
+                device['type'] == hwclass.HOSTDEV
+                and 'specParams' in device
+                and device['specParams'].get('iommuPlaceholder', False)
+            ):
                 continue
 
             # Each device has alias.

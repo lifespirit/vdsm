@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 SUBDIRS = protect sdm
@@ -68,9 +68,9 @@ dist_vdsmstorage_PYTHON = \
 	persistent.py \
 	qemuimg.py \
 	rbdSD.py \
-rbdVolume.py \
-rbd_utils.py \
-resourceFactories.py \
+	rbdVolume.py \
+	rbd_utils.py \
+	resourceFactories.py \
 	resourceManager.py \
 	rwlock.py \
 	sanlockconf.py \

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import os
@@ -18,7 +18,10 @@ class GlusterStorageDomain(nfsSD.NfsStorageDomain):
 
     if config.getboolean("gluster", "enable_4k_storage"):
         supported_block_size = (
-            sc.BLOCK_SIZE_AUTO, sc.BLOCK_SIZE_512, sc.BLOCK_SIZE_4K)
+            sc.BLOCK_SIZE_AUTO,
+            sc.BLOCK_SIZE_512,
+            sc.BLOCK_SIZE_4K,
+        )
 
     @classmethod
     def getMountPoint(cls, mountPath):

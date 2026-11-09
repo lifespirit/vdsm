@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 from contextlib import contextmanager
@@ -26,7 +26,6 @@ from vdsm.network.nmstate import update_num_vfs
 from . import canonicalize
 from .errors import RollbackIncomplete
 from . import netconfpersistence
-
 
 DUMMY_BRIDGE
 

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Red Hat, Inc.
+# SPDX-FileCopyrightText: oVirt Developers
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 FROM quay.io/almalinuxorg/almalinux:9
@@ -13,6 +13,7 @@ RUN dnf install -y 'dnf-command(copr)' \
         automake \
         createrepo_c \
         dnf-utils \
+        dnsmasq \
         dosfstools \
         e2fsprogs \
         gcc \
