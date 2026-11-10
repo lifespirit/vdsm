@@ -119,3 +119,115 @@ def test_volume_manifest_can_validate_during_init(monkeypatch):
         "/repo", DOMAIN_A, IMAGE_A, "vol-a")
     assert vol.pool == POOL
     assert vol.getVolumePath() == POOL + "/volume-vol-a"
+
+
+
+def test_missing_image_is_not_a_ceph_connection_error(monkeypatch):
+    monkeypatch.setattr(
+        rbdSD.rbd_utils, "list_images",
+        lambda *args, **kwargs: ["volume-existing"])
+    assert rbdSD.rbd_utils.image_exists(POOL, "volume-missing") is False
+    assert rbdSD.rbd_utils.image_exists(POOL, "volume-existing") is True
+
+
+def test_image_exists_propagates_ceph_errors(monkeypatch):
+    import pytest
+
+    def unavailable(*args, **kwargs):
+        raise rbdSD.rbd_utils.RBDCommandError("Ceph unavailable")
+
+    monkeypatch.setattr(rbdSD.rbd_utils, "list_images", unavailable)
+    with pytest.raises(rbdSD.rbd_utils.RBDCommandError):
+        rbdSD.rbd_utils.image_exists(POOL, "volume-foo")
+
+
+def test_create_rolls_back_image_and_lease_after_metadata_failure(monkeypatch):
+    import pytest
+
+    calls = []
+    dom = SimpleNamespace(
+        sdUUID=DOMAIN_A,
+        manifest=SimpleNamespace(pool=POOL, ceph_user=lambda: "ovirt"),
+        create_volume_lease=lambda vol: calls.append(("lease-create", vol)),
+        delete_volume_lease=lambda vol: calls.append(("lease-delete", vol)),
+        _getRepoPath=lambda: "/repo",
+    )
+    monkeypatch.setattr(
+        rbdVolume.rbd_utils, "create_image",
+        lambda *args, **kwargs: calls.append(("image-create", args[1])))
+    monkeypatch.setattr(
+        rbdVolume.rbd_utils, "remove_image",
+        lambda *args, **kwargs: calls.append(("image-delete", args[1])))
+
+    def fail_meta(*args, **kwargs):
+        raise RuntimeError("metadata failed")
+
+    monkeypatch.setattr(rbdVolume.rbd_utils, "set_image_meta", fail_meta)
+    with pytest.raises(RuntimeError, match="metadata failed"):
+        rbdVolume.RBDVolume.create(
+            dom, IMAGE_A, 1048576, sc.RAW_FORMAT, sc.SPARSE_VOL,
+            sc.DATA_DISKTYPE, "vol-a", "", sd.BLANK_UUID, sd.BLANK_UUID)
+
+    assert calls == [
+        ("image-create", "volume-vol-a"),
+        ("lease-create", "vol-a"),
+        ("image-delete", "volume-vol-a"),
+        ("lease-delete", "vol-a"),
+    ]
+
+
+def test_create_retains_lease_when_image_cleanup_fails(monkeypatch):
+    import pytest
+
+    calls = []
+    dom = SimpleNamespace(
+        sdUUID=DOMAIN_A,
+        manifest=SimpleNamespace(pool=POOL, ceph_user=lambda: "ovirt"),
+        create_volume_lease=lambda vol: calls.append("lease-create"),
+        delete_volume_lease=lambda vol: calls.append("lease-delete"),
+        _getRepoPath=lambda: "/repo",
+    )
+    monkeypatch.setattr(
+        rbdVolume.rbd_utils, "create_image",
+        lambda *args, **kwargs: None)
+
+    def fail_remove(*args, **kwargs):
+        raise RuntimeError("RBD still exists")
+
+    def fail_meta(*args, **kwargs):
+        raise RuntimeError("metadata failed")
+
+    monkeypatch.setattr(rbdVolume.rbd_utils, "remove_image", fail_remove)
+    monkeypatch.setattr(rbdVolume.rbd_utils, "set_image_meta", fail_meta)
+    with pytest.raises(RuntimeError, match="metadata failed"):
+        rbdVolume.RBDVolume.create(
+            dom, IMAGE_A, 1048576, sc.RAW_FORMAT, sc.SPARSE_VOL,
+            sc.DATA_DISKTYPE, "vol-a", "", sd.BLANK_UUID, sd.BLANK_UUID)
+
+    assert calls == ["lease-create"]
+
+
+def test_delete_preserves_lease_if_image_removal_fails(monkeypatch):
+    import pytest
+
+    calls = []
+    monkeypatch.setattr(
+        rbdVolume.sdCache, "produce",
+        lambda sd_uuid: SimpleNamespace(
+            manifest=SimpleNamespace(ceph_user=lambda: "ovirt"),
+            delete_volume_lease=lambda vol: calls.append("lease-delete"),
+        ))
+
+    def fail_remove(*args, **kwargs):
+        calls.append("image-delete")
+        raise RuntimeError("image busy")
+
+    monkeypatch.setattr(rbdVolume.rbd_utils, "remove_image", fail_remove)
+    vol = object.__new__(rbdVolume.RBDVolume)
+    vol._manifest = SimpleNamespace(
+        sdUUID=DOMAIN_A, volUUID="vol-a",
+        pool=POOL, rbd_image="volume-vol-a")
+    with pytest.raises(RuntimeError, match="image busy"):
+        vol.delete()
+
+    assert calls == ["image-delete"]
