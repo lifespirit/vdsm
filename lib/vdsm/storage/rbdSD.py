@@ -229,28 +229,38 @@ class RBDStorageDomainManifest(sd.StorageDomainManifest):
     def getVAllocSize(self, imgUUID, volUUID):
         return self.getVolumeSize(imgUUID, volUUID).truesize
 
+    def _owned_volume_metadata(self, image):
+        # A Ceph pool can contain multiple oVirt storage domains. Never
+        # expose volumes belonging to a different storage domain.
+        meta = rbd_utils.get_image_metadata(
+            self.pool, image, ceph_user=self._ceph_user)
+        if meta.get(sc.DOMAIN) != self.sdUUID:
+            return None
+        if not meta.get(sc.IMAGE):
+            log.warning("Skipping RBD volume %s with missing IMAGE metadata",
+                        image)
+            return None
+        return meta
+
     def getAllImages(self):
         images = set()
         for image in rbd_utils.list_volume_images(
                 self.pool, ceph_user=self._ceph_user):
-            img_uuid = rbd_utils.get_image_meta(
-                self.pool, image, "imgUUID", ceph_user=self._ceph_user)
-            if img_uuid:
-                images.add(img_uuid)
+            meta = self._owned_volume_metadata(image)
+            if meta is not None:
+                images.add(meta[sc.IMAGE])
         return list(images)
 
     def getAllVolumes(self):
         volumes = {}
         for image in rbd_utils.list_volume_images(
                 self.pool, ceph_user=self._ceph_user):
+            meta = self._owned_volume_metadata(image)
+            if meta is None:
+                continue
             vol_uuid = image[len("volume-"):]
-            img_uuid = rbd_utils.get_image_meta(
-                self.pool, image, "imgUUID", "",
-                ceph_user=self._ceph_user)
-            parent = rbd_utils.get_image_meta(
-                self.pool, image, "parent", sd.BLANK_UUID,
-                ceph_user=self._ceph_user)
-            volumes[vol_uuid] = sd.ImgsPar([img_uuid], parent)
+            volumes[vol_uuid] = sd.ImgsPar(
+                [meta[sc.IMAGE]], meta.get(sc.PUUID, sd.BLANK_UUID))
         return volumes
 
     def refreshDirTree(self):
@@ -488,12 +498,12 @@ class RBDStorageDomain(sd.StorageDomain):
         return info
 
     def getStats(self):
-        free, total = rbd_utils.pool_capacity(
+        stats = rbd_utils.pool_capacity(
             self._manifest.pool, ceph_user=self._manifest.ceph_user())
         mdasize = blockSD.METADATA_LV_SIZE_MB * 1024 * 1024
         return {
-            "disktotal": total,
-            "diskfree": free,
+            "disktotal": stats["disktotal"],
+            "diskfree": stats["diskfree"],
             "mdasize": mdasize,
             "mdafree": mdasize,
             "mdavalid": True,

@@ -324,12 +324,9 @@ def list_images(pool, ceph_user=None):
 
 
 def image_exists(pool, image, ceph_user=None):
-    try:
-        _run(_rbd_cmd(pool, ceph_user) + [
-            "info", rbd_spec(pool, image)])
-        return True
-    except RBDCommandError:
-        return False
+    # Listing distinguishes an absent image from a disconnected Ceph pool.
+    # A failed rbd info must not be mistaken for an absent image.
+    return image in list_images(pool, ceph_user=ceph_user)
 
 
 def image_info(pool, image, ceph_user=None):
@@ -382,22 +379,17 @@ def set_image_meta(pool, image, values, ceph_user=None):
 
 
 def get_image_meta(pool, image, key, default=None, ceph_user=None):
-    try:
-        out = _run(_rbd_cmd(pool, ceph_user) + [
-            "image-meta", "get", rbd_spec(pool, image), key])
-    except RBDCommandError:
-        return default
-    return out.decode("utf-8").strip()
+    return get_image_metadata(
+        pool, image, ceph_user=ceph_user).get(key, default)
 
 
 def get_image_metadata(pool, image, ceph_user=None):
-    try:
-        out = _run(_rbd_cmd(pool, ceph_user) + [
-            "image-meta", "list", rbd_spec(pool, image),
-            "--format", "json",
-        ])
-    except RBDCommandError:
-        return {}
+    # Propagate Ceph auth, connection and I/O failures rather than treating
+    # them as missing metadata.
+    out = _run(_rbd_cmd(pool, ceph_user) + [
+        "image-meta", "list", rbd_spec(pool, image),
+        "--format", "json",
+    ])
     return json.loads(out.decode("utf-8"))
 
 
@@ -452,11 +444,10 @@ def lv_path(vg, lv):
 
 
 def pool_stats(pool, ceph_user=None):
-    try:
-        out = _run(_ceph_cmd(pool, ceph_user) + ["df", "--format", "json"])
-        data = json.loads(out.decode("utf-8"))
-    except Exception:
-        return {"diskfree": 0, "disktotal": 0}
+    # A disconnected Ceph cluster is not an empty cluster. Let the caller
+    # report a storage error rather than advertising zero capacity.
+    out = _run(_ceph_cmd(pool, ceph_user) + ["df", "--format", "json"])
+    data = json.loads(out.decode("utf-8"))
 
     for pool_info in data.get("pools", []):
         if pool_info.get("name") != pool:
@@ -465,7 +456,7 @@ def pool_stats(pool, ceph_user=None):
         free = int(stats.get("max_avail", 0))
         used = int(stats.get("bytes_used", stats.get("stored", 0)))
         return {"diskfree": free, "disktotal": free + used}
-    return {"diskfree": 0, "disktotal": 0}
+    raise RBDCommandError("Ceph df did not report RBD pool %r" % pool)
 
 
 pool_capacity = pool_stats

@@ -28,10 +28,12 @@ class RBDVolumeManifest(volume.VolumeManifest):
     align_size = 1024 * 1024
 
     def __init__(self, repoPath, sdUUID, imgUUID, volUUID):
-        super(RBDVolumeManifest, self).__init__(
-            repoPath, sdUUID, imgUUID, volUUID)
+        # VolumeManifest.__init__() calls validateVolumePath() immediately.
+        # The attributes used by that validation must already exist.
         self.pool = _pool_for_domain(sdUUID)
         self.rbd_image = rbd_utils.volume_image_name(volUUID)
+        super(RBDVolumeManifest, self).__init__(
+            repoPath, sdUUID, imgUUID, volUUID)
         self._volumePath = "%s/%s" % (self.pool, self.rbd_image)
 
     @classmethod
@@ -205,12 +207,10 @@ class RBDVolumeManifest(volume.VolumeManifest):
         result = []
         for image in rbd_utils.list_volume_images(
                 manifest.pool, ceph_user=manifest.ceph_user()):
-            image_meta = rbd_utils.get_image_meta(
-                manifest.pool,
-                image,
-                "imgUUID",
-                ceph_user=manifest.ceph_user())
-            if image_meta == imgUUID:
+            meta = rbd_utils.get_image_metadata(
+                manifest.pool, image, ceph_user=manifest.ceph_user())
+            if (meta.get(sc.DOMAIN) == sdUUID and
+                    meta.get(sc.IMAGE) == imgUUID):
                 result.append(image[len("volume-"):])
         return result
 
@@ -240,41 +240,58 @@ class RBDVolume(volume.Volume):
 
         try:
             dom.create_volume_lease(volUUID)
+            metadata = _new_metadata(
+                dom.sdUUID,
+                imgUUID,
+                volUUID,
+                capacity,
+                preallocate,
+                diskType,
+                desc,
+                legal,
+                sequence,
+            )
+            rbd_utils.set_image_meta(
+                pool, image, metadata, ceph_user=ceph_user)
+            return cls(dom._getRepoPath(), dom.sdUUID, imgUUID, volUUID)
         except Exception:
-            log.error(
-                "Rolling back RBD image %s/%s after lease failure",
-                pool, image, exc_info=True)
+            log.error("Rolling back incomplete RBD volume %s/%s",
+                      pool, image, exc_info=True)
+            # Only release the lease once removal of its RBD image succeeded.
+            # An unsuccessful cleanup leaves a recoverable lease+image pair.
             try:
                 rbd_utils.remove_image(pool, image, ceph_user=ceph_user)
-            finally:
-                raise
-
-        metadata = _new_metadata(
-            dom.sdUUID,
-            imgUUID,
-            volUUID,
-            capacity,
-            preallocate,
-            diskType,
-            desc,
-            legal,
-            sequence,
-        )
-        rbd_utils.set_image_meta(
-            pool, image, metadata, ceph_user=ceph_user)
-        return cls(dom._getRepoPath(), dom.sdUUID, imgUUID, volUUID)
+            except Exception:
+                log.exception(
+                    "Cannot remove incomplete RBD image %s/%s; "
+                    "retaining its lease for recovery", pool, image)
+            else:
+                # The lease allocator can fail after persisting an entry.
+                # Try cleanup even when create_volume_lease() raised.
+                try:
+                    dom.delete_volume_lease(volUUID)
+                except se.NoSuchLease:
+                    pass
+                except Exception:
+                    log.exception(
+                        "Cannot remove lease of incomplete RBD volume %s",
+                        volUUID)
+            raise
 
     def delete(self, postZero=False, force=False, discard=False):
         dom = sdCache.produce(self.sdUUID)
         ceph_user = dom.manifest.ceph_user()
-        try:
-            dom.delete_volume_lease(self.volUUID)
-        except se.NoSuchLease:
-            log.warning("RBD volume %s had no xlease", self.volUUID)
+        # Do not release the SANLock lease while the data image still exists.
+        # If RBD deletion fails (e.g. watchers, connectivity), retain the
+        # lease and propagate the error to the caller.
         rbd_utils.remove_image(
             self._manifest.pool,
             self._manifest.rbd_image,
             ceph_user=ceph_user)
+        try:
+            dom.delete_volume_lease(self.volUUID)
+        except se.NoSuchLease:
+            log.warning("RBD volume %s had no xlease", self.volUUID)
 
 
 def _pool_for_domain(sdUUID):
