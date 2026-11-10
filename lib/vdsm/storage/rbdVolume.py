@@ -28,10 +28,12 @@ class RBDVolumeManifest(volume.VolumeManifest):
     align_size = 1024 * 1024
 
     def __init__(self, repoPath, sdUUID, imgUUID, volUUID):
-        super(RBDVolumeManifest, self).__init__(
-            repoPath, sdUUID, imgUUID, volUUID)
+        # VolumeManifest.__init__() calls validateVolumePath() immediately.
+        # The attributes used by that validation must already exist.
         self.pool = _pool_for_domain(sdUUID)
         self.rbd_image = rbd_utils.volume_image_name(volUUID)
+        super(RBDVolumeManifest, self).__init__(
+            repoPath, sdUUID, imgUUID, volUUID)
         self._volumePath = "%s/%s" % (self.pool, self.rbd_image)
 
     @classmethod
@@ -205,12 +207,10 @@ class RBDVolumeManifest(volume.VolumeManifest):
         result = []
         for image in rbd_utils.list_volume_images(
                 manifest.pool, ceph_user=manifest.ceph_user()):
-            image_meta = rbd_utils.get_image_meta(
-                manifest.pool,
-                image,
-                "imgUUID",
-                ceph_user=manifest.ceph_user())
-            if image_meta == imgUUID:
+            meta = rbd_utils.get_image_metadata(
+                manifest.pool, image, ceph_user=manifest.ceph_user())
+            if (meta.get(sc.DOMAIN) == sdUUID and
+                    meta.get(sc.IMAGE) == imgUUID):
                 result.append(image[len("volume-"):])
         return result
 
