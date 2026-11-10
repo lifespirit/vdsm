@@ -444,11 +444,10 @@ def lv_path(vg, lv):
 
 
 def pool_stats(pool, ceph_user=None):
-    try:
-        out = _run(_ceph_cmd(pool, ceph_user) + ["df", "--format", "json"])
-        data = json.loads(out.decode("utf-8"))
-    except Exception:
-        return {"diskfree": 0, "disktotal": 0}
+    # A disconnected Ceph cluster is not an empty cluster. Let the caller
+    # report a storage error rather than advertising zero capacity.
+    out = _run(_ceph_cmd(pool, ceph_user) + ["df", "--format", "json"])
+    data = json.loads(out.decode("utf-8"))
 
     for pool_info in data.get("pools", []):
         if pool_info.get("name") != pool:
@@ -457,7 +456,7 @@ def pool_stats(pool, ceph_user=None):
         free = int(stats.get("max_avail", 0))
         used = int(stats.get("bytes_used", stats.get("stored", 0)))
         return {"diskfree": free, "disktotal": free + used}
-    return {"diskfree": 0, "disktotal": 0}
+    raise RBDCommandError("Ceph df did not report RBD pool %r" % pool)
 
 
 pool_capacity = pool_stats

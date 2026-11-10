@@ -231,3 +231,48 @@ def test_delete_preserves_lease_if_image_removal_fails(monkeypatch):
         vol.delete()
 
     assert calls == ["image-delete"]
+
+
+
+def test_create_cleans_partially_created_lease(monkeypatch):
+    import pytest
+
+    calls = []
+
+    def fail_lease(vol):
+        calls.append("lease-create")
+        raise RuntimeError("lease index write failed")
+
+    dom = SimpleNamespace(
+        sdUUID=DOMAIN_A,
+        manifest=SimpleNamespace(pool=POOL, ceph_user=lambda: "ovirt"),
+        create_volume_lease=fail_lease,
+        delete_volume_lease=lambda vol: calls.append("lease-delete"),
+        _getRepoPath=lambda: "/repo",
+    )
+    monkeypatch.setattr(
+        rbdVolume.rbd_utils, "create_image",
+        lambda *args, **kwargs: calls.append("image-create"))
+    monkeypatch.setattr(
+        rbdVolume.rbd_utils, "remove_image",
+        lambda *args, **kwargs: calls.append("image-delete"))
+
+    with pytest.raises(RuntimeError, match="lease index write failed"):
+        rbdVolume.RBDVolume.create(
+            dom, IMAGE_A, 1048576, sc.RAW_FORMAT, sc.SPARSE_VOL,
+            sc.DATA_DISKTYPE, "vol-a", "", sd.BLANK_UUID, sd.BLANK_UUID)
+
+    assert calls == [
+        "image-create", "lease-create", "image-delete", "lease-delete"
+    ]
+
+
+def test_pool_stats_propagates_unavailable_ceph(monkeypatch):
+    import pytest
+
+    def fail(*args, **kwargs):
+        raise rbdSD.rbd_utils.RBDCommandError("Ceph unavailable")
+
+    monkeypatch.setattr(rbdSD.rbd_utils, "_run", fail)
+    with pytest.raises(rbdSD.rbd_utils.RBDCommandError):
+        rbdSD.rbd_utils.pool_stats(POOL)

@@ -238,10 +238,8 @@ class RBDVolume(volume.Volume):
         image = rbd_utils.volume_image_name(volUUID)
         rbd_utils.create_image(pool, image, capacity, ceph_user=ceph_user)
 
-        lease_created = False
         try:
             dom.create_volume_lease(volUUID)
-            lease_created = True
             metadata = _new_metadata(
                 dom.sdUUID,
                 imgUUID,
@@ -268,13 +266,16 @@ class RBDVolume(volume.Volume):
                     "Cannot remove incomplete RBD image %s/%s; "
                     "retaining its lease for recovery", pool, image)
             else:
-                if lease_created:
-                    try:
-                        dom.delete_volume_lease(volUUID)
-                    except Exception:
-                        log.exception(
-                            "Cannot remove lease of incomplete RBD volume %s",
-                            volUUID)
+                # The lease allocator can fail after persisting an entry.
+                # Try cleanup even when create_volume_lease() raised.
+                try:
+                    dom.delete_volume_lease(volUUID)
+                except se.NoSuchLease:
+                    pass
+                except Exception:
+                    log.exception(
+                        "Cannot remove lease of incomplete RBD volume %s",
+                        volUUID)
             raise
 
     def delete(self, postZero=False, force=False, discard=False):
