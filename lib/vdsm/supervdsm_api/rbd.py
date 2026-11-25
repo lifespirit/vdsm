@@ -3,12 +3,16 @@
 
 """Root-only helpers for the experimental native RBD storage domain."""
 
+import base64
+import binascii
 import json
 import os
 import re
 import stat
 import subprocess
 import tempfile
+import uuid
+from xml.sax.saxutils import escape
 
 from vdsm.supervdsm_api import expose
 
@@ -97,13 +101,73 @@ def rbd_write_ceph_keyring(identity, ceph_user, ceph_key):
 
 
 @expose
-def rbd_map_lock_image(pool, image, ceph_user=None, keyring=None):
+def rbd_ensure_libvirt_secret(secret_uuid, ceph_user, keyring, label):
+    """Restore a Ceph libvirt secret without exposing the key to VDSM."""
+    # Root-only endpoint: read the existing keyring, never return key data.
+    import libvirt
+
+    secret_uuid = str(uuid.UUID(str(secret_uuid)))
+    ceph_user = _normalize_ceph_user(ceph_user)
+    if not ceph_user:
+        raise ValueError("Missing CephX user")
+    ceph_key = _read_keyring(ceph_user, keyring)
+    xml = (
+        "<secret ephemeral='no' private='yes'>"
+        "<uuid>%s</uuid>"
+        "<usage type='ceph'><name>client.%s rbd-%s</name></usage>"
+        "</secret>"
+    ) % (escape(secret_uuid), escape(ceph_user), escape(str(label)))
+    conn = libvirt.open("qemu:///system")
+    if conn is None:
+        raise RuntimeError("Cannot connect to libvirt for RBD secret")
+    try:
+        # Define or refresh the requested persistent secret. This also
+        # restores a secret removed from libvirt during host reprovisioning.
+        secret = conn.secretDefineXML(xml)
+        secret.setValue(ceph_key, 0)
+    finally:
+        conn.close()
+    return secret_uuid
+
+
+def _read_keyring(user, path):
+    """Read a root-owned Ceph keyring, requiring the expected identity."""
+    if (not path or os.path.dirname(path) != KEYRING_DIR or
+            not path.endswith(".keyring")):
+        raise ValueError("Invalid Ceph keyring path")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if (info.st_uid != 0 or not stat.S_ISREG(info.st_mode) or
+                stat.S_IMODE(info.st_mode) & 0o077):
+            raise PermissionError("Unsafe Ceph keyring")
+        with os.fdopen(fd, "r") as stream:
+            fd = -1
+            content = stream.read(4096)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    match = re.fullmatch(
+        r"\[client\.([^\]\n]+)\]\s+key\s*=\s*([^\s]+)\s*",
+        content)
+    if not match or match.group(1) != user:
+        raise ValueError("Ceph keyring identity mismatch")
+    try:
+        return base64.b64decode(match.group(2), validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("Invalid CephX key encoding") from None
+
+
+@expose
+def rbd_map_lock_image(pool, image, ceph_user=None, keyring=None,
+                       monitors=None):
     """Map the shared lock image and return the stable krbd path."""
     spec = "%s/%s" % (pool, image)
     path = "/dev/rbd/%s/%s" % (pool, image)
 
     if not os.path.exists(path):
-        _run(_rbd_cmd(ceph_user, keyring) + ["device", "map", spec])
+        _run(_rbd_cmd(ceph_user, keyring, monitors) +
+             ["device", "map", spec])
 
     if not os.path.exists(path):
         raise RuntimeError("RBD lock image mapped but path missing: %s" % path)
@@ -129,7 +193,8 @@ def rbd_deactivate_vg(vg_name):
 
 @expose
 def rbd_create_domain_layout(pool, sd_uuid, lock_size_mib, lv_sizes,
-                             ceph_user=None, keyring=None):
+                             ceph_user=None, keyring=None,
+                             monitors=None):
     """Create the root-owned RBD lock-image/LVM domain layout.
 
     This is the privileged half of rbdSD.RBDStorageDomain.create().  It
@@ -141,7 +206,7 @@ def rbd_create_domain_layout(pool, sd_uuid, lock_size_mib, lv_sizes,
     vg_name = _vg_name(sd_uuid)
     spec = "%s/%s" % (pool, lock_image)
     path = _rbd_path(pool, lock_image)
-    rbd_cmd = _rbd_cmd(ceph_user, keyring)
+    rbd_cmd = _rbd_cmd(ceph_user, keyring, monitors)
 
     _run(rbd_cmd + [
         "create", spec,
@@ -172,14 +237,17 @@ def rbd_create_domain_layout(pool, sd_uuid, lock_size_mib, lv_sizes,
         return path
     except Exception:
         _best_effort_remove_domain_layout(
-            pool, sd_uuid, ceph_user=ceph_user, keyring=keyring)
+            pool, sd_uuid, ceph_user=ceph_user, keyring=keyring,
+            monitors=monitors)
         raise
 
 
 @expose
-def rbd_remove_domain_layout(pool, sd_uuid, ceph_user=None, keyring=None):
+def rbd_remove_domain_layout(pool, sd_uuid, ceph_user=None, keyring=None,
+                             monitors=None):
     _best_effort_remove_domain_layout(
-        pool, sd_uuid, ceph_user=ceph_user, keyring=keyring)
+        pool, sd_uuid, ceph_user=ceph_user, keyring=keyring,
+        monitors=monitors)
 
 
 @expose
@@ -190,7 +258,7 @@ def rbd_vg_uuid(vg_name):
 
 
 def _best_effort_remove_domain_layout(pool, sd_uuid, ceph_user=None,
-                                      keyring=None):
+                                      keyring=None, monitors=None):
     lock_image = _lock_image_name(sd_uuid)
     vg_name = _vg_name(sd_uuid)
     path = _rbd_path(pool, lock_image)
@@ -199,8 +267,9 @@ def _best_effort_remove_domain_layout(pool, sd_uuid, ceph_user=None,
     _try(["vgremove", "-ff", "-y", vg_name])
     if os.path.exists(path):
         _try(["pvremove", "-ff", "-y", path])
-        _try(_rbd_cmd(ceph_user, keyring) + ["device", "unmap", path])
-    _try(_rbd_cmd(ceph_user, keyring) + [
+        _try(_rbd_cmd(ceph_user, keyring, monitors) +
+             ["device", "unmap", path])
+    _try(_rbd_cmd(ceph_user, keyring, monitors) + [
         "rm", "%s/%s" % (pool, lock_image), "--no-progress"])
 
 
@@ -216,13 +285,15 @@ def _rbd_path(pool, image):
     return "/dev/rbd/%s/%s" % (pool, image)
 
 
-def _rbd_cmd(ceph_user=None, keyring=None):
+def _rbd_cmd(ceph_user=None, keyring=None, monitors=None):
     cmd = ["rbd"]
     user = _normalize_ceph_user(ceph_user)
     if user:
         cmd.extend(["--id", user])
     if keyring:
         cmd.extend(["--keyring", str(keyring)])
+    if monitors:
+        cmd.extend(["--mon-host", str(monitors)])
     return cmd
 
 

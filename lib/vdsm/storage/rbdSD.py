@@ -89,7 +89,8 @@ def connectStorageServer(conList):
         try:
             conn = rbd_utils.register_connection(params)
             rbd_utils.list_images(
-                conn["pool"], ceph_user=conn.get("cephUser"))
+                conn["pool"], ceph_user=conn.get("cephUser"),
+                sd_uuid=conn.get("sdUUID") or None)
         except Exception:
             log.warning("Cannot connect RBD pool %s", conn["pool"],
                         exc_info=True)
@@ -118,7 +119,7 @@ class RBDStorageDomainManifest(sd.StorageDomainManifest):
         self.lock_image = lock_image
         self.lock_device = lock_device
         self.vg_name = rbd_utils.vg_name(sdUUID)
-        conn = rbd_utils.connection_for_pool(pool, ceph_user)
+        conn = rbd_utils.connection_for_domain(sdUUID, pool, ceph_user)
         self._monitors = monitors or conn.get("monitors", "")
         self._ceph_user = ceph_user or conn.get("cephUser", "")
         self._secret_uuid = secret_uuid or conn.get("secretUUID", "")
@@ -143,7 +144,8 @@ class RBDStorageDomainManifest(sd.StorageDomainManifest):
 
     def setup(self):
         self.lock_device = rbd_utils.map_lock_image(
-            self.pool, self.lock_image, self._ceph_user)
+            self.pool, self.lock_image, self._ceph_user,
+            sd_uuid=self.sdUUID)
         rbd_utils.activate_vg(self.vg_name)
 
     def teardown(self):
@@ -174,12 +176,15 @@ class RBDStorageDomainManifest(sd.StorageDomainManifest):
 
     def _load_rbd_metadata(self):
         self._monitors = rbd_utils.get_image_meta(
-            self.pool, self.lock_image, RBD_META_MONITORS, self._monitors)
+            self.pool, self.lock_image, RBD_META_MONITORS, self._monitors,
+            ceph_user=self._ceph_user, sd_uuid=self.sdUUID)
         self._ceph_user = rbd_utils.get_image_meta(
-            self.pool, self.lock_image, RBD_META_CEPH_USER, self._ceph_user)
+            self.pool, self.lock_image, RBD_META_CEPH_USER, self._ceph_user,
+            ceph_user=self._ceph_user, sd_uuid=self.sdUUID)
         self._secret_uuid = rbd_utils.get_image_meta(
             self.pool, self.lock_image, RBD_META_SECRET_UUID,
-            self._secret_uuid)
+            self._secret_uuid, ceph_user=self._ceph_user,
+            sd_uuid=self.sdUUID)
 
     def _lv_path(self, name):
         try:
@@ -220,7 +225,7 @@ class RBDStorageDomainManifest(sd.StorageDomainManifest):
         size = rbd_utils.image_size(
             self.pool,
             rbd_utils.volume_image_name(volUUID),
-            ceph_user=self._ceph_user,
+            ceph_user=self._ceph_user, sd_uuid=self.sdUUID,
         )
         return sd.VolumeSize(apparentsize=size, truesize=size)
 
@@ -234,7 +239,8 @@ class RBDStorageDomainManifest(sd.StorageDomainManifest):
         # A Ceph pool can contain multiple oVirt storage domains. Never
         # expose volumes belonging to a different storage domain.
         meta = rbd_utils.get_image_metadata(
-            self.pool, image, ceph_user=self._ceph_user)
+            self.pool, image, ceph_user=self._ceph_user,
+            sd_uuid=self.sdUUID)
         if meta.get(sc.DOMAIN) != self.sdUUID:
             return None
         if not meta.get(sc.IMAGE):
@@ -246,7 +252,8 @@ class RBDStorageDomainManifest(sd.StorageDomainManifest):
     def getAllImages(self):
         images = set()
         for image in rbd_utils.list_volume_images(
-                self.pool, ceph_user=self._ceph_user):
+                self.pool, ceph_user=self._ceph_user,
+                sd_uuid=self.sdUUID):
             meta = self._owned_volume_metadata(image)
             if meta is not None:
                 images.add(meta[sc.IMAGE])
@@ -255,7 +262,8 @@ class RBDStorageDomainManifest(sd.StorageDomainManifest):
     def getAllVolumes(self):
         volumes = {}
         for image in rbd_utils.list_volume_images(
-                self.pool, ceph_user=self._ceph_user):
+                self.pool, ceph_user=self._ceph_user,
+                sd_uuid=self.sdUUID):
             meta = self._owned_volume_metadata(image)
             if meta is None:
                 continue
@@ -346,7 +354,7 @@ class RBDStorageDomain(sd.StorageDomain):
                     RBD_META_CEPH_USER: ceph_user,
                     RBD_META_SECRET_UUID: secret_uuid,
                 },
-                ceph_user=ceph_user,
+                ceph_user=ceph_user, sd_uuid=sdUUID,
             )
             xleases_path = rbd_utils.lv_path(vg_name, sd.XLEASES)
             cls.format_external_leases(
@@ -500,7 +508,8 @@ class RBDStorageDomain(sd.StorageDomain):
 
     def getStats(self):
         stats = rbd_utils.pool_capacity(
-            self._manifest.pool, ceph_user=self._manifest.ceph_user())
+            self._manifest.pool, ceph_user=self._manifest.ceph_user(),
+            sd_uuid=self.sdUUID)
         mdasize = blockSD.METADATA_LV_SIZE_MB * 1024 * 1024
         return {
             "disktotal": stats["disktotal"],
@@ -552,11 +561,19 @@ class RBDStorageDomain(sd.StorageDomain):
 
     @classmethod
     def format(cls, sdUUID):
-        for pool in rbd_utils.configured_pools():
+        known = rbd_utils.known_domain_connection(sdUUID)
+        candidates = ([known] if known else [
+            conn for conn in rbd_utils.configured_connections()
+            if not conn.get("sdUUID")])
+        for conn in candidates:
+            pool = conn["pool"]
             lock_image = rbd_utils.lock_image_name(sdUUID)
-            if not rbd_utils.image_exists(pool, lock_image):
+            if not rbd_utils.image_exists(
+                    pool, lock_image, ceph_user=conn.get("cephUser"),
+                    sd_uuid=conn.get("sdUUID") or None):
                 continue
-            rbd_utils.remove_domain_layout(pool, sdUUID)
+            rbd_utils.remove_domain_layout(
+                pool, sdUUID, ceph_user=conn.get("cephUser"))
             try:
                 fileUtils.cleanupdir(cls.findDomainPath(sdUUID),
                                      ignoreErrors=True)
@@ -575,36 +592,42 @@ class RBDStorageDomain(sd.StorageDomain):
 
 
 def getStorageDomainsList():
-    uuids = []
-    for pool in rbd_utils.configured_pools():
+    uuids = set()
+    for conn in rbd_utils.configured_connections():
+        pool = conn["pool"]
         try:
-            images = rbd_utils.list_images(pool)
+            images = rbd_utils.list_images(
+                pool, ceph_user=conn.get("cephUser"),
+                sd_uuid=conn.get("sdUUID") or None)
         except Exception:
             log.warning("Cannot list RBD pool %s", pool, exc_info=True)
             continue
         for image in images:
             sd_uuid = _parse_lock_image(image)
             if sd_uuid:
-                uuids.append(sd_uuid)
-    return uuids
+                uuids.add(sd_uuid)
+    return sorted(uuids)
 
 
 def findDomain(sdUUID):
-    for pool in rbd_utils.configured_pools():
+    known = rbd_utils.known_domain_connection(sdUUID)
+    candidates = ([known] if known else [
+        conn for conn in rbd_utils.configured_connections()
+        if not conn.get("sdUUID")])
+    for conn in candidates:
+        pool = conn["pool"]
         lock_image = rbd_utils.lock_image_name(sdUUID)
-        if not rbd_utils.image_exists(pool, lock_image):
+        if not rbd_utils.image_exists(
+                pool, lock_image, ceph_user=conn.get("cephUser"),
+                sd_uuid=conn.get("sdUUID") or None):
             continue
-        conn = rbd_utils.connection_for_domain(sdUUID, pool)
         lock_device = rbd_utils.map_lock_image(
-            pool, lock_image, conn.get("cephUser"))
+            pool, lock_image, conn.get("cephUser"),
+            sd_uuid=conn.get("sdUUID") or None)
         rbd_utils.activate_vg(rbd_utils.vg_name(sdUUID))
         manifest = RBDStorageDomainManifest(
-            sdUUID,
-            pool,
-            lock_image,
-            lock_device=lock_device,
-            monitors=conn.get("monitors"),
-            ceph_user=conn.get("cephUser"),
+            sdUUID, pool, lock_image, lock_device=lock_device,
+            monitors=conn.get("monitors"), ceph_user=conn.get("cephUser"),
             secret_uuid=conn.get("secretUUID"),
         )
         return RBDStorageDomain(manifest)

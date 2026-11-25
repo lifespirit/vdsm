@@ -58,7 +58,8 @@ class RBDVolumeManifest(volume.VolumeManifest):
 
     def validateVolumePath(self):
         if not rbd_utils.image_exists(
-                self.pool, self.rbd_image, ceph_user=self._ceph_user()):
+                self.pool, self.rbd_image, ceph_user=self._ceph_user(),
+                sd_uuid=self.sdUUID):
             raise se.VolumeDoesNotExist(self.volUUID)
 
     def getVolumePath(self):
@@ -66,11 +67,12 @@ class RBDVolumeManifest(volume.VolumeManifest):
         return self._volumePath
 
     def getMetadataId(self):
-        return self.pool, self.rbd_image
+        return self.pool, self.rbd_image, self.sdUUID
 
     def getMetadata(self, metaId=None):
         meta = rbd_utils.get_image_metadata(
-            self.pool, self.rbd_image, ceph_user=self._ceph_user())
+            self.pool, self.rbd_image, ceph_user=self._ceph_user(),
+            sd_uuid=self.sdUUID)
         if not meta:
             raise se.VolumeMetadataReadError(self.volUUID)
         return meta
@@ -79,7 +81,8 @@ class RBDVolumeManifest(volume.VolumeManifest):
         values = dict(meta)
         values.update(overrides)
         rbd_utils.set_image_meta(
-            self.pool, self.rbd_image, values, ceph_user=self._ceph_user())
+            self.pool, self.rbd_image, values, ceph_user=self._ceph_user(),
+            sd_uuid=self.sdUUID)
 
     def removeMetadata(self, metaId=None):
         # RBD image metadata is removed with the image.  Keeping this as a
@@ -88,10 +91,10 @@ class RBDVolumeManifest(volume.VolumeManifest):
 
     @classmethod
     def _putMetadata(cls, metaId, meta, **overrides):
-        pool, image = metaId
+        pool, image, sd_uuid = metaId
         values = dict(meta)
         values.update(overrides)
-        rbd_utils.set_image_meta(pool, image, values)
+        rbd_utils.set_image_meta(pool, image, values, sd_uuid=sd_uuid)
 
     def getParent(self):
         return self.getMetadata().get(sc.PUUID, sd.BLANK_UUID)
@@ -108,11 +111,13 @@ class RBDVolumeManifest(volume.VolumeManifest):
         if capacity is not None:
             return int(capacity)
         return rbd_utils.image_size(
-            self.pool, self.rbd_image, ceph_user=self._ceph_user())
+            self.pool, self.rbd_image, ceph_user=self._ceph_user(),
+            sd_uuid=self.sdUUID)
 
     def getVolumeTrueSize(self):
         return rbd_utils.image_size(
-            self.pool, self.rbd_image, ceph_user=self._ceph_user())
+            self.pool, self.rbd_image, ceph_user=self._ceph_user(),
+            sd_uuid=self.sdUUID)
 
     def getFormat(self):
         return sc.name2type(self.getMetadata().get(sc.FORMAT, "RAW"))
@@ -168,7 +173,8 @@ class RBDVolumeManifest(volume.VolumeManifest):
 
     def _extendSize(self, newSize):
         rbd_utils.resize_image(
-            self.pool, self.rbd_image, newSize, ceph_user=self._ceph_user())
+            self.pool, self.rbd_image, newSize, ceph_user=self._ceph_user(),
+            sd_uuid=self.sdUUID)
         meta = self.getMetadata()
         meta[sc.CAPACITY] = str(newSize)
         self.setMetadata(meta)
@@ -206,9 +212,11 @@ class RBDVolumeManifest(volume.VolumeManifest):
         manifest = sdCache.produce_manifest(sdUUID)
         result = []
         for image in rbd_utils.list_volume_images(
-                manifest.pool, ceph_user=manifest.ceph_user()):
+                manifest.pool, ceph_user=manifest.ceph_user(),
+                sd_uuid=sdUUID):
             meta = rbd_utils.get_image_metadata(
-                manifest.pool, image, ceph_user=manifest.ceph_user())
+                manifest.pool, image, ceph_user=manifest.ceph_user(),
+                sd_uuid=sdUUID)
             if (meta.get(sc.DOMAIN) == sdUUID and
                     meta.get(sc.IMAGE) == imgUUID):
                 result.append(image[len("volume-"):])
@@ -236,7 +244,8 @@ class RBDVolume(volume.Volume):
         pool = dom.manifest.pool
         ceph_user = dom.manifest.ceph_user()
         image = rbd_utils.volume_image_name(volUUID)
-        rbd_utils.create_image(pool, image, capacity, ceph_user=ceph_user)
+        rbd_utils.create_image(
+            pool, image, capacity, ceph_user=ceph_user, sd_uuid=dom.sdUUID)
 
         try:
             dom.create_volume_lease(volUUID)
@@ -252,7 +261,8 @@ class RBDVolume(volume.Volume):
                 sequence,
             )
             rbd_utils.set_image_meta(
-                pool, image, metadata, ceph_user=ceph_user)
+                pool, image, metadata, ceph_user=ceph_user,
+                sd_uuid=dom.sdUUID)
             return cls(dom._getRepoPath(), dom.sdUUID, imgUUID, volUUID)
         except Exception:
             log.error("Rolling back incomplete RBD volume %s/%s",
@@ -260,7 +270,8 @@ class RBDVolume(volume.Volume):
             # Only release the lease once removal of its RBD image succeeded.
             # An unsuccessful cleanup leaves a recoverable lease+image pair.
             try:
-                rbd_utils.remove_image(pool, image, ceph_user=ceph_user)
+                rbd_utils.remove_image(
+                    pool, image, ceph_user=ceph_user, sd_uuid=dom.sdUUID)
             except Exception:
                 log.exception(
                     "Cannot remove incomplete RBD image %s/%s; "
@@ -287,7 +298,7 @@ class RBDVolume(volume.Volume):
         rbd_utils.remove_image(
             self._manifest.pool,
             self._manifest.rbd_image,
-            ceph_user=ceph_user)
+            ceph_user=ceph_user, sd_uuid=self.sdUUID)
         try:
             dom.delete_volume_lease(self.volUUID)
         except se.NoSuchLease:
