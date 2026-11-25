@@ -25,6 +25,7 @@ import base64
 import binascii
 import json
 import os
+import threading
 import uuid
 from xml.sax.saxutils import escape
 
@@ -44,6 +45,9 @@ RBD_SECRET_NAMESPACE = uuid.UUID("7902ebec-819d-4485-b680-91d0f53c36bf")
 _runtime_connections = {}
 _domain_connections = {}
 _default_pool_connections = {}
+_saved_connections = []
+_registry_loaded = False
+_registry_lock = threading.RLock()
 
 
 class RBDCommandError(RuntimeError):
@@ -51,6 +55,7 @@ class RBDCommandError(RuntimeError):
 
 
 def configured_pools():
+    _restore_connections()
     pools = set(_default_pool_connections)
     pools.update(conn["pool"] for conn in _runtime_connections.values())
     env_pools = os.environ.get("VDSM_RBD_POOLS", DEFAULT_POOL)
@@ -110,25 +115,80 @@ def register_pool(pool, monitors=None, ceph_user=None, ceph_key=None):
     })
 
 
+def _rebuild_connections(entries):
+    _runtime_connections.clear()
+    _domain_connections.clear()
+    _default_pool_connections.clear()
+    for conn in entries:
+        key = _connection_key(conn["pool"], conn.get("cephUser"))
+        _runtime_connections[key] = conn
+        _default_pool_connections[conn["pool"]] = conn
+        if conn.get("sdUUID"):
+            _domain_connections[conn["sdUUID"]] = conn
+
+
+def _restore_connections():
+    """Read root-owned, key-free connection configuration on first use."""
+    global _registry_loaded
+    with _registry_lock:
+        if _registry_loaded:
+            return
+        entries = supervdsm.getProxy().rbd_load_connections()
+        restored = []
+        for item in entries:
+            if "cephKey" in item:
+                raise ValueError("CephX key in RBD registry")
+            conn = normalize_connection(item)
+            conn["keyring"] = item.get("keyring", "")
+            restored.append(_without_secret(conn))
+        _saved_connections[:] = restored
+        _rebuild_connections(_saved_connections)
+        _registry_loaded = True
+
+
+def _same_connection(a, b):
+    if a.get("sdUUID") or b.get("sdUUID"):
+        return (a.get("sdUUID") and
+                a.get("sdUUID") == b.get("sdUUID"))
+    return _connection_key(a["pool"], a.get("cephUser")) == (
+        _connection_key(b["pool"], b.get("cephUser")))
+
+
 def register_connection(params):
+    _restore_connections()
     conn = normalize_connection(params)
     if conn.get("cephKey"):
         conn = ensure_connection_credentials(conn)
+    else:
+        previous = next((item for item in _saved_connections
+                         if _same_connection(item, conn)), None)
+        if previous:
+            conn["keyring"] = conn.get("keyring") or previous.get("keyring", "")
+            if not conn["monitors"]:
+                conn["monitors"] = previous.get("monitors", "")
+            if not params.get("secretUUID"):
+                conn["secretUUID"] = previous.get("secretUUID", "")
     store = _without_secret(conn)
-    key = _connection_key(store["pool"], store.get("cephUser"))
-    _runtime_connections[key] = store
-    _default_pool_connections[store["pool"]] = store
-    if store.get("sdUUID"):
-        _domain_connections[store["sdUUID"]] = store
+    with _registry_lock:
+        updated = [item for item in _saved_connections
+                   if not _same_connection(item, store)]
+        updated.append(store)
+        # Persist successfully before publishing changes in memory.
+        supervdsm.getProxy().rbd_save_connections(updated)
+        _saved_connections[:] = updated
+        _rebuild_connections(updated)
     return dict(store)
 
 
 def unregister_connection(params):
+    _restore_connections()
     conn = normalize_connection(params)
-    key = _connection_key(conn["pool"], conn.get("cephUser"))
-    _runtime_connections.pop(key, None)
-    if conn.get("sdUUID"):
-        _domain_connections.pop(conn["sdUUID"], None)
+    with _registry_lock:
+        updated = [item for item in _saved_connections
+                   if not _same_connection(item, conn)]
+        supervdsm.getProxy().rbd_save_connections(updated)
+        _saved_connections[:] = updated
+        _rebuild_connections(updated)
     return _without_secret(conn)
 
 
@@ -144,6 +204,7 @@ def registered_config(pool):
 
 
 def connection_for_pool(pool, ceph_user=None):
+    _restore_connections()
     user = normalize_ceph_user(ceph_user)
     if user:
         conn = _runtime_connections.get(_connection_key(pool, user))
@@ -166,6 +227,7 @@ def connection_for_pool(pool, ceph_user=None):
 
 
 def connection_for_domain(sd_uuid, pool=None, ceph_user=None):
+    _restore_connections()
     conn = _domain_connections.get(sd_uuid)
     if conn:
         return conn
@@ -472,6 +534,9 @@ def _rbd_cmd(pool=None, ceph_user=None):
     keyring = conn.get("keyring")
     if keyring:
         cmd.extend(["--keyring", keyring])
+    mon_hosts = conn.get("monitors")
+    if mon_hosts:
+        cmd.extend(["--mon-host", mon_hosts])
     return cmd
 
 
@@ -485,6 +550,9 @@ def _ceph_cmd(pool=None, ceph_user=None):
     keyring = conn.get("keyring")
     if keyring:
         cmd.extend(["--keyring", keyring])
+    mon_hosts = conn.get("monitors")
+    if mon_hosts:
+        cmd.extend(["--mon-host", mon_hosts])
     return cmd
 
 
