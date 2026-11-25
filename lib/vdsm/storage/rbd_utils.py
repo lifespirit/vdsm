@@ -166,7 +166,8 @@ def register_connection(params):
             conn["keyring"] = conn.get("keyring") or previous.get("keyring", "")
             if not conn["monitors"]:
                 conn["monitors"] = previous.get("monitors", "")
-            if not params.get("secretUUID"):
+            if not (isinstance(params, dict) and
+                    params.get("secretUUID")):
                 conn["secretUUID"] = previous.get("secretUUID", "")
     store = _without_secret(conn)
     with _registry_lock:

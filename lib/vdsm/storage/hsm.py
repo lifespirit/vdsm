@@ -2548,15 +2548,20 @@ class HSM(object):
         if not conList:
             raise se.InvalidParameterException("conList", conList)
 
+        # RBD connection dictionaries contain CephX keys. Never interpolate
+        # them into the default exception (which may be logged by VDSM).
+        if domType == sd.RBD_DOMAIN:
+            vars.task.setDefaultException(
+                se.StorageServerConnectionError(
+                    "RBD storage connection failed"))
+            return rbdSD.connectStorageServer(conList)
+
         vars.task.setDefaultException(
             se.StorageServerConnectionError(
                 "domType=%s, spUUID=%s, conList=%s"
                 % (domType, spUUID, conList)
             )
         )
-
-        if domType == sd.RBD_DOMAIN:
-            return rbdSD.connectStorageServer(conList)
 
         results = storageServer.connect(domType, conList)
 
@@ -2623,15 +2628,18 @@ class HSM(object):
             self.log.warning("Connection list is empty, ignoring request")
             return dict(statuslist=[])
 
+        if domType == sd.RBD_DOMAIN:
+            vars.task.setDefaultException(
+                se.StorageServerDisconnectionError(
+                    "RBD storage disconnection failed"))
+            return rbdSD.disconnectStorageServer(conList)
+
         vars.task.setDefaultException(
             se.StorageServerDisconnectionError(
                 "domType=%s, spUUID=%s, conList=%s"
                 % (domType, spUUID, conList)
             )
         )
-
-        if domType == sd.RBD_DOMAIN:
-            return rbdSD.disconnectStorageServer(conList)
 
         results = storageServer.disconnect(domType, conList)
 
@@ -2718,6 +2726,9 @@ class HSM(object):
             )
         )
         domVersion = int(domVersion)
+        if storageType == sd.RBD_DOMAIN:
+            # typeSpecificArg can contain cephKey. Do not put it in errors.
+            msg = "RBD domain creation failed: sdUUID=%s" % sdUUID
         vars.task.setDefaultException(se.StorageDomainCreationError(msg))
         misc.validateUUID(sdUUID, 'sdUUID')
         self.validateNonDomain(sdUUID)

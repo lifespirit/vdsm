@@ -85,8 +85,9 @@ def connectStorageServer(conList):
     """
     results = []
     for params in conList:
-        conn = rbd_utils.register_connection(params)
+        conn = rbd_utils.normalize_connection(params)
         try:
+            conn = rbd_utils.register_connection(params)
             rbd_utils.list_images(
                 conn["pool"], ceph_user=conn.get("cephUser"))
         except Exception:
