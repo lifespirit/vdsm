@@ -58,6 +58,7 @@ def configured_pools():
     _restore_connections()
     pools = set(_default_pool_connections)
     pools.update(conn["pool"] for conn in _runtime_connections.values())
+    pools.update(conn["pool"] for conn in _domain_connections.values())
     env_pools = os.environ.get("VDSM_RBD_POOLS", DEFAULT_POOL)
     pools.update(pool.strip() for pool in env_pools.split(",")
                  if pool.strip())
@@ -120,12 +121,12 @@ def _rebuild_connections(entries):
     _domain_connections.clear()
     _default_pool_connections.clear()
     for conn in entries:
-        key = _connection_key(conn["pool"], conn.get("cephUser"))
-        _runtime_connections[key] = conn
-        _default_pool_connections[conn["pool"]] = conn
         if conn.get("sdUUID"):
             _domain_connections[conn["sdUUID"]] = conn
-
+        else:
+            key = _connection_key(conn["pool"], conn.get("cephUser"))
+            _runtime_connections[key] = conn
+            _default_pool_connections[conn["pool"]] = conn
 
 def _restore_connections():
     """Read root-owned, key-free connection configuration on first use."""
@@ -204,16 +205,32 @@ def registered_config(pool):
     }
 
 
-def connection_for_pool(pool, ceph_user=None):
+def connection_for_pool(pool, ceph_user=None, sd_uuid=None):
     _restore_connections()
     user = normalize_ceph_user(ceph_user)
-    if user:
-        conn = _runtime_connections.get(_connection_key(pool, user))
-        if conn:
-            return conn
-    conn = _default_pool_connections.get(pool)
-    if conn:
-        return conn
+    if sd_uuid:
+        domain = _domain_connections.get(sd_uuid)
+        if domain:
+            if domain["pool"] != pool or (
+                    user and normalize_ceph_user(domain.get("cephUser")) != user):
+                raise RBDCommandError(
+                    "RBD connection mismatch for domain %s" % sd_uuid)
+            return domain
+
+    candidates = [
+        c for c in _saved_connections
+        if c["pool"] == pool
+        and (not user or normalize_ceph_user(c.get("cephUser")) == user)
+        and (not sd_uuid or not c.get("sdUUID"))
+    ]
+    if len(candidates) > 1:
+        raise RBDCommandError(
+            "Ambiguous RBD pool credentials for %s: sd_uuid required" % pool)
+    if candidates:
+        return candidates[0]
+    if sd_uuid and any(c["pool"] == pool for c in _saved_connections):
+        raise RBDCommandError(
+            "No RBD credentials registered for domain %s" % sd_uuid)
     return {
         "id": pool,
         "pool": pool,
@@ -226,16 +243,36 @@ def connection_for_pool(pool, ceph_user=None):
         "sdUUID": "",
     }
 
-
 def connection_for_domain(sd_uuid, pool=None, ceph_user=None):
     _restore_connections()
     conn = _domain_connections.get(sd_uuid)
     if conn:
+        if pool is not None and conn["pool"] != pool:
+            raise RBDCommandError("RBD pool mismatch for domain %s" % sd_uuid)
+        if ceph_user and normalize_ceph_user(ceph_user) != (
+                normalize_ceph_user(conn.get("cephUser"))):
+            raise RBDCommandError(
+                "CephX user mismatch for domain %s" % sd_uuid)
         return conn
     if pool is not None:
-        return connection_for_pool(pool, ceph_user)
-    return connection_for_pool(DEFAULT_POOL, ceph_user)
+        return connection_for_pool(pool, ceph_user, sd_uuid=sd_uuid)
+    return connection_for_pool(DEFAULT_POOL, ceph_user, sd_uuid=sd_uuid)
 
+
+def known_domain_connection(sd_uuid):
+    _restore_connections()
+    return _domain_connections.get(sd_uuid)
+
+
+def configured_connections():
+    """Enumerate each configured Ceph connection independently."""
+    _restore_connections()
+    entries = list(_saved_connections)
+    env_pools = os.environ.get("VDSM_RBD_POOLS", DEFAULT_POOL)
+    for pool in (name.strip() for name in env_pools.split(",")):
+        if pool and not any(c["pool"] == pool for c in entries):
+            entries.append(connection_for_pool(pool))
+    return entries
 
 def monitors_to_string(monitors):
     if monitors is None:
@@ -313,6 +350,16 @@ def libvirt_auth(pool=None, ceph_user=None, secret_uuid=None, sd_uuid=None):
                    libvirt_secret_uuid(pool, user, sd_uuid=sd_uuid))
     if not secret_uuid:
         return None
+    if sd_uuid:
+        # QEMU may be started after libvirt host reprovisioning. Ensure its
+        # secret is restored immediately before passing disk XML to libvirt.
+        conn = connection_for_domain(sd_uuid, pool, user)
+        if not conn.get("keyring"):
+            raise RBDCommandError(
+                "Cannot restore CephX secret for domain %s: no keyring"
+                % sd_uuid)
+        supervdsm.getProxy().rbd_ensure_libvirt_secret(
+            secret_uuid, user, conn["keyring"], sd_uuid)
     return {
         "username": user,
         "secretUUID": secret_uuid,
@@ -381,86 +428,85 @@ def rbd_spec(pool, image):
     return "%s/%s" % (pool, image)
 
 
-def list_images(pool, ceph_user=None):
-    out = _run(_rbd_cmd(pool, ceph_user) + ["ls", pool])
+def list_images(pool, ceph_user=None, sd_uuid=None):
+    out = _run(_rbd_cmd(pool, ceph_user, sd_uuid=sd_uuid) + ["ls", pool])
     return out.decode("utf-8").splitlines()
 
 
-def image_exists(pool, image, ceph_user=None):
-    # Listing distinguishes an absent image from a disconnected Ceph pool.
-    # A failed rbd info must not be mistaken for an absent image.
-    return image in list_images(pool, ceph_user=ceph_user)
+def image_exists(pool, image, ceph_user=None, sd_uuid=None):
+    return image in list_images(pool, ceph_user=ceph_user, sd_uuid=sd_uuid)
 
 
-def image_info(pool, image, ceph_user=None):
-    out = _run(_rbd_cmd(pool, ceph_user) + [
+def image_info(pool, image, ceph_user=None, sd_uuid=None):
+    out = _run(_rbd_cmd(pool, ceph_user, sd_uuid=sd_uuid) + [
         "info", rbd_spec(pool, image), "--format", "json"])
     return json.loads(out.decode("utf-8"))
 
 
-def image_size(pool, image, ceph_user=None):
-    return int(image_info(pool, image, ceph_user=ceph_user)["size"])
+def image_size(pool, image, ceph_user=None, sd_uuid=None):
+    return int(image_info(
+        pool, image, ceph_user=ceph_user, sd_uuid=sd_uuid)["size"])
 
 
-def list_volume_images(pool, ceph_user=None):
-    return [name for name in list_images(pool, ceph_user=ceph_user)
-            if name.startswith("volume-")]
+def list_volume_images(pool, ceph_user=None, sd_uuid=None):
+    return [name for name in list_images(
+        pool, ceph_user=ceph_user, sd_uuid=sd_uuid)
+        if name.startswith("volume-")]
 
 
-def create_image(pool, image, size_bytes, ceph_user=None):
+def create_image(pool, image, size_bytes, ceph_user=None, sd_uuid=None):
     size_mib = int(size_bytes // 1024 // 1024)
     if size_mib <= 0:
         raise ValueError("RBD image size must be positive")
-    _run(_rbd_cmd(pool, ceph_user) + [
+    _run(_rbd_cmd(pool, ceph_user, sd_uuid=sd_uuid) + [
         "create", rbd_spec(pool, image),
         "--size", str(size_mib),
         "--image-format", "2",
     ])
 
 
-def remove_image(pool, image, ceph_user=None):
-    _run(_rbd_cmd(pool, ceph_user) + [
+def remove_image(pool, image, ceph_user=None, sd_uuid=None):
+    _run(_rbd_cmd(pool, ceph_user, sd_uuid=sd_uuid) + [
         "rm", rbd_spec(pool, image), "--no-progress"])
 
 
-def resize_image(pool, image, size_bytes, ceph_user=None):
+def resize_image(pool, image, size_bytes, ceph_user=None, sd_uuid=None):
     size_mib = int(size_bytes // 1024 // 1024)
     if size_mib <= 0:
         raise ValueError("RBD image size must be positive")
-    _run(_rbd_cmd(pool, ceph_user) + [
+    _run(_rbd_cmd(pool, ceph_user, sd_uuid=sd_uuid) + [
         "resize", rbd_spec(pool, image), "--size", str(size_mib)])
 
 
-def set_image_meta(pool, image, values, ceph_user=None):
+def set_image_meta(pool, image, values, ceph_user=None, sd_uuid=None):
     for key, value in values.items():
         if value is None:
             value = ""
-        _run(_rbd_cmd(pool, ceph_user) + [
+        _run(_rbd_cmd(pool, ceph_user, sd_uuid=sd_uuid) + [
             "image-meta", "set", rbd_spec(pool, image),
             str(key), str(value),
         ])
 
 
-def get_image_meta(pool, image, key, default=None, ceph_user=None):
+def get_image_meta(pool, image, key, default=None, ceph_user=None,
+                   sd_uuid=None):
     return get_image_metadata(
-        pool, image, ceph_user=ceph_user).get(key, default)
+        pool, image, ceph_user=ceph_user, sd_uuid=sd_uuid).get(key, default)
 
 
-def get_image_metadata(pool, image, ceph_user=None):
-    # Propagate Ceph auth, connection and I/O failures rather than treating
-    # them as missing metadata.
-    out = _run(_rbd_cmd(pool, ceph_user) + [
+def get_image_metadata(pool, image, ceph_user=None, sd_uuid=None):
+    out = _run(_rbd_cmd(pool, ceph_user, sd_uuid=sd_uuid) + [
         "image-meta", "list", rbd_spec(pool, image),
         "--format", "json",
     ])
     return json.loads(out.decode("utf-8"))
 
 
-def map_lock_image(pool, image, ceph_user=None):
-    conn = connection_for_pool(pool, ceph_user)
+def map_lock_image(pool, image, ceph_user=None, sd_uuid=None):
+    conn = connection_for_pool(pool, ceph_user, sd_uuid=sd_uuid)
     user = ceph_user or conn.get("cephUser")
     return supervdsm.getProxy().rbd_map_lock_image(
-        pool, image, user, conn.get("keyring", ""))
+        pool, image, user, conn.get("keyring", ""), conn.get("monitors", ""))
 
 
 def unmap_lock_image(path):
@@ -478,6 +524,7 @@ def create_domain_layout(pool, sd_uuid, lock_size_mib, lv_sizes,
         list(lv_sizes),
         user,
         conn.get("keyring", ""),
+        conn.get("monitors", ""),
     )
 
 
@@ -485,7 +532,8 @@ def remove_domain_layout(pool, sd_uuid, ceph_user=None):
     conn = connection_for_domain(sd_uuid, pool, ceph_user)
     user = ceph_user or conn.get("cephUser")
     return supervdsm.getProxy().rbd_remove_domain_layout(
-        pool, sd_uuid, user, conn.get("keyring", ""))
+        pool, sd_uuid, user, conn.get("keyring", ""),
+        conn.get("monitors", ""))
 
 
 def vg_uuid(name):
@@ -506,12 +554,10 @@ def lv_path(vg, lv):
     return "/dev/%s/%s" % (vg, lv)
 
 
-def pool_stats(pool, ceph_user=None):
-    # A disconnected Ceph cluster is not an empty cluster. Let the caller
-    # report a storage error rather than advertising zero capacity.
-    out = _run(_ceph_cmd(pool, ceph_user) + ["df", "--format", "json"])
+def pool_stats(pool, ceph_user=None, sd_uuid=None):
+    out = _run(_ceph_cmd(pool, ceph_user, sd_uuid=sd_uuid) +
+               ["df", "--format", "json"])
     data = json.loads(out.decode("utf-8"))
-
     for pool_info in data.get("pools", []):
         if pool_info.get("name") != pool:
             continue
@@ -524,12 +570,10 @@ def pool_stats(pool, ceph_user=None):
 
 pool_capacity = pool_stats
 
-
-def _rbd_cmd(pool=None, ceph_user=None):
+def _rbd_cmd(pool=None, ceph_user=None, sd_uuid=None):
     cmd = ["rbd"]
-    conn = connection_for_pool(pool, ceph_user) if pool else {}
-    user = ceph_user or conn.get("cephUser")
-    user = normalize_ceph_user(user)
+    conn = connection_for_pool(pool, ceph_user, sd_uuid) if pool else {}
+    user = normalize_ceph_user(ceph_user or conn.get("cephUser"))
     if user:
         cmd.extend(["--id", user])
     keyring = conn.get("keyring")
@@ -540,12 +584,10 @@ def _rbd_cmd(pool=None, ceph_user=None):
         cmd.extend(["--mon-host", mon_hosts])
     return cmd
 
-
-def _ceph_cmd(pool=None, ceph_user=None):
+def _ceph_cmd(pool=None, ceph_user=None, sd_uuid=None):
     cmd = ["ceph"]
-    conn = connection_for_pool(pool, ceph_user) if pool else {}
-    user = ceph_user or conn.get("cephUser")
-    user = normalize_ceph_user(user)
+    conn = connection_for_pool(pool, ceph_user, sd_uuid) if pool else {}
+    user = normalize_ceph_user(ceph_user or conn.get("cephUser"))
     if user:
         cmd.extend(["--id", user])
     keyring = conn.get("keyring")
@@ -555,7 +597,6 @@ def _ceph_cmd(pool=None, ceph_user=None):
     if mon_hosts:
         cmd.extend(["--mon-host", mon_hosts])
     return cmd
-
 
 def _normalize_monitor_item(item):
     item = item.strip()

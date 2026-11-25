@@ -12,6 +12,7 @@ class FakeSuperVdsm:
     def __init__(self):
         self.saved = []
         self.keyrings = []
+        self.recovered = []
 
     def rbd_load_connections(self):
         return [dict(x) for x in self.saved]
@@ -23,6 +24,10 @@ class FakeSuperVdsm:
     def rbd_write_ceph_keyring(self, identity, user, key):
         self.keyrings.append((identity, user, key))
         return "/var/lib/vdsm/rbd/%s.keyring" % identity
+
+    def rbd_ensure_libvirt_secret(self, uuid, user, keyring, label):
+        self.recovered.append((uuid, user, keyring, label))
+        return uuid
 
 
 @pytest.fixture
@@ -102,3 +107,85 @@ def test_load_failure_does_not_hide_storage_error(registry, monkeypatch):
     monkeypatch.setattr(registry, "rbd_load_connections", fail)
     with pytest.raises(OSError, match="registry unavailable"):
         rbd_utils.configured_pools()
+
+
+def test_same_pool_same_user_domain_specific_credentials(registry):
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain1", "cephUser": "vm",
+        "monitors": "mon-a:3300", "cephKey": "secret-one",
+    })
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain2", "cephUser": "vm",
+        "monitors": "mon-b:3300", "cephKey": "secret-two",
+    })
+    cmd_a = rbd_utils._rbd_cmd("pool1", "vm", sd_uuid="domain1")
+    cmd_b = rbd_utils._rbd_cmd("pool1", "vm", sd_uuid="domain2")
+    assert "domain1.keyring" in " ".join(cmd_a)
+    assert "domain2.keyring" in " ".join(cmd_b)
+    assert "mon-a:3300" in cmd_a
+    assert "mon-b:3300" in cmd_b
+    assert cmd_a != cmd_b
+    assert len(registry.saved) == 2
+
+
+def test_ambiguous_pool_without_domain_fails_closed(registry):
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain1", "cephUser": "vm",
+        "cephKey": "secret-one",
+    })
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain2", "cephUser": "vm",
+        "cephKey": "secret-two",
+    })
+    with pytest.raises(rbd_utils.RBDCommandError, match="Ambiguous"):
+        rbd_utils._rbd_cmd("pool1", "vm")
+
+
+def test_domain_pool_mismatch_fails_closed(registry):
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain1", "cephUser": "vm",
+        "cephKey": "secret-value",
+    })
+    with pytest.raises(rbd_utils.RBDCommandError, match="mismatch"):
+        rbd_utils._rbd_cmd("another-pool", "vm", sd_uuid="domain1")
+
+
+def test_domain_secret_restored_from_keyring(registry):
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain1", "cephUser": "vm",
+        "cephKey": "secret-value",
+    })
+    auth = rbd_utils.libvirt_auth("pool1", "vm", sd_uuid="domain1")
+    assert auth["username"] == "vm"
+    assert auth["secretUUID"]
+    assert registry.recovered == [(
+        auth["secretUUID"], "vm",
+        "/var/lib/vdsm/rbd/domain1.keyring", "domain1",
+    )]
+
+
+def test_domain_secret_requires_keyring(registry):
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain1", "cephUser": "vm",
+    })
+    with pytest.raises(rbd_utils.RBDCommandError, match="no keyring"):
+        rbd_utils.libvirt_auth("pool1", "vm", sd_uuid="domain1")
+
+
+def test_recovery_after_registry_reload_uses_original_domain_keyring(
+        registry, monkeypatch):
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain1", "cephUser": "vm",
+        "cephKey": "first",
+    })
+    rbd_utils.register_connection({
+        "pool": "pool1", "sdUUID": "domain2", "cephUser": "vm",
+        "cephKey": "second",
+    })
+    monkeypatch.setattr(rbd_utils, "_registry_loaded", False)
+    monkeypatch.setattr(rbd_utils, "_saved_connections", [])
+    monkeypatch.setattr(rbd_utils, "_runtime_connections", {})
+    monkeypatch.setattr(rbd_utils, "_domain_connections", {})
+    monkeypatch.setattr(rbd_utils, "_default_pool_connections", {})
+    rbd_utils.libvirt_auth("pool1", "vm", sd_uuid="domain1")
+    assert registry.recovered[-1][2].endswith("domain1.keyring")
