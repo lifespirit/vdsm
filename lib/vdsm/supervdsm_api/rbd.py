@@ -3,14 +3,76 @@
 
 """Root-only helpers for the experimental native RBD storage domain."""
 
+import json
 import os
 import re
+import stat
 import subprocess
+import tempfile
 
 from vdsm.supervdsm_api import expose
 
 
 KEYRING_DIR = "/var/lib/vdsm/rbd"
+CONNECTIONS_PATH = os.path.join(KEYRING_DIR, "connections.json")
+REGISTRY_FIELDS = {"id", "pool", "monitors", "cephUser", "sdUUID",
+                   "secretUUID", "keyring"}
+
+
+def _validate_registry(entries):
+    if not isinstance(entries, list):
+        raise ValueError("Invalid RBD registry format")
+    cleaned = []
+    for item in entries:
+        if not isinstance(item, dict) or not item.get("pool"):
+            raise ValueError("Invalid RBD registry entry")
+        if set(item) - REGISTRY_FIELDS:
+            raise ValueError("Unexpected RBD registry fields")
+        keyring = item.get("keyring")
+        if keyring:
+            if (os.path.dirname(keyring) != KEYRING_DIR or
+                    not keyring.endswith(".keyring")):
+                raise ValueError("Invalid RBD keyring path")
+            info = os.stat(keyring)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or
+                    stat.S_IMODE(info.st_mode) & 0o077):
+                raise ValueError("Unsafe RBD keyring permissions")
+        cleaned.append(dict(item))
+    return cleaned
+
+
+@expose
+def rbd_load_connections():
+    """Load non-secret connection metadata from root-owned storage."""
+    try:
+        with open(CONNECTIONS_PATH) as stream:
+            entries = json.load(stream)
+    except FileNotFoundError:
+        return []
+    return _validate_registry(entries)
+
+
+@expose
+def rbd_save_connections(entries):
+    """Atomically write non-secret metadata with root-only permissions."""
+    cleaned = _validate_registry(entries)
+    os.makedirs(KEYRING_DIR, mode=0o700, exist_ok=True)
+    fd, path = tempfile.mkstemp(prefix=".connections-", dir=KEYRING_DIR)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(cleaned, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(path, 0o600)
+        os.replace(path, CONNECTIONS_PATH)
+        directory = os.open(KEYRING_DIR, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(path):
+            os.unlink(path)
 
 
 @expose
